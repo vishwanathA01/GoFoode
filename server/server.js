@@ -2,14 +2,19 @@ import http from "http";
 import mongoose from "mongoose";
 import { Server } from "socket.io";
 import app from "./app.js";
-import { config } from "./config.js";
+import { config, isAllowedClientOrigin } from "./config.js";
 import jwt from "jsonwebtoken";
 import { User } from "./models.js";
 
 await mongoose.connect(config.mongoUri);
 console.log("MongoDB connected");
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: config.clientUrl, credentials: true } });
+const io = new Server(server, {
+  cors: {
+    origin: (origin, callback) => callback(null, isAllowedClientOrigin(origin)),
+    credentials: true
+  }
+});
 
 io.use(async (socket, next) => {
   try {

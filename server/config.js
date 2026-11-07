@@ -2,11 +2,24 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const chatbotProvider = (process.env.CHATBOT_PROVIDER || "openai-compatible").toLowerCase();
+const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+
+export function isAllowedClientOrigin(origin) {
+  if (!origin || origin === clientUrl) return true;
+  if (process.env.NODE_ENV === "production") return false;
+
+  try {
+    const url = new URL(origin);
+    return url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
 
 export const config = {
   port: process.env.PORT || 5001,
   mongoUri: process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/dineflow",
-  clientUrl: process.env.CLIENT_URL || "http://localhost:5173",
+  clientUrl,
   accessSecret: process.env.JWT_ACCESS_SECRET || "development_access_secret_change_me_123456",
   refreshSecret: process.env.JWT_REFRESH_SECRET || "development_refresh_secret_change_me_123456",
   accessExpires: process.env.JWT_ACCESS_EXPIRES || "15m",
