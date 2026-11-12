@@ -1,0 +1,17 @@
+{
+  "name": "gofoode",
+  "private": true,
+  "version": "1.0.0",
+  "description": "GoFoode food delivery platform: run the API and the website together.",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "setup": "npm install --prefix server && npm install --prefix client",
+    "seed": "npm run seed --prefix server",
+    "build": "npm run build --prefix client",
+    "start": "npm start --prefix server"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

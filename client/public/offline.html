@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#ff6b35" />
+  <title>You're offline · GoFoode</title>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #fffdfb; color: #13213a; font-family: 'DM Sans', system-ui, -apple-system, sans-serif; text-align: center; }
+    main { max-width: 380px; }
+    img { width: 88px; height: 88px; border-radius: 22px; box-shadow: 0 16px 36px rgba(255, 92, 22, .3); }
+    h1 { font: 800 28px/1.15 Manrope, system-ui, sans-serif; letter-spacing: -.03em; margin: 22px 0 8px; }
+    p { margin: 0 0 24px; color: #5b6577; line-height: 1.6; }
+    button { border: 0; border-radius: 14px; padding: 14px 24px; background: linear-gradient(115deg, #ffa200, #ff5c16); color: #fff; font: 800 15px system-ui, sans-serif; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="/icons/icon-192.png" alt="" />
+    <h1>You're offline</h1>
+    <p>GoFoode needs an internet connection to show menus and place orders. Your cart is saved and will be waiting when you're back.</p>
+    <button type="button" onclick="location.reload()">Try again</button>
+  </main>
+</body>
+</html>
