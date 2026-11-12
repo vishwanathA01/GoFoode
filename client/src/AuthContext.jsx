@@ -92,9 +92,16 @@ export function AuthProvider({ children }) {
     const state = String(fields.state || "").trim();
     const postalCode = String(fields.postalCode || "").trim();
     if (!city) return null;
-    const label = [area, city, state].filter(Boolean).join(", ");
-    const next = { area, city, state, postalCode, label, source: "manual", updatedAt: new Date().toISOString() };
+    const label = String(fields.label || "").trim() || [area, city, state].filter(Boolean).join(", ");
+    // A place picked from search or a saved address keeps its coordinates, so checkout can use them.
+    const latitude = Number.isFinite(Number(fields.latitude)) && fields.latitude !== null && fields.latitude !== "" ? Number(fields.latitude) : undefined;
+    const longitude = Number.isFinite(Number(fields.longitude)) && fields.longitude !== null && fields.longitude !== "" ? Number(fields.longitude) : undefined;
+    const next = { area, city, state, postalCode, label, ...(latitude !== undefined && longitude !== undefined ? { latitude, longitude } : {}), source: fields.source || "manual", updatedAt: new Date().toISOString() };
     localStorage.setItem("gofoode_location", JSON.stringify(next));
+    try {
+      const recent = JSON.parse(localStorage.getItem("gofoode_recent_locations") || "[]").filter(entry => entry?.label && entry.label !== label);
+      localStorage.setItem("gofoode_recent_locations", JSON.stringify([next, ...recent].slice(0, 4)));
+    } catch { localStorage.removeItem("gofoode_recent_locations"); }
     setLocation(next);
     setLocationStatus("manual");
     setLocationError("");
@@ -112,7 +119,8 @@ export function AuthProvider({ children }) {
         savedLocationData = JSON.parse(savedLocation || "null");
         updatedAt = Date.parse(savedLocationData?.updatedAt || "");
       } catch { localStorage.removeItem("gofoode_location"); }
-      if (savedLocationData?.source !== "manual" && (!Number.isFinite(updatedAt) || Date.now() - updatedAt > 60 * 60 * 1000)) requestLocation();
+      // Only GPS fixes (no source) refresh themselves; a place the customer picked stays put.
+      if (!savedLocationData?.source && (!Number.isFinite(updatedAt) || Date.now() - updatedAt > 60 * 60 * 1000)) requestLocation();
     }).catch(() => {
       localStorage.removeItem("dineflow_token");
       setUser(null);

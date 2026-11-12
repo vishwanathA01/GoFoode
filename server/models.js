@@ -15,8 +15,13 @@ const userSchema = new Schema({
   profileImage: { type: String, default: "" },
   isVerified: { type: Boolean, default: false },
   isActive: { type: Boolean, default: true },
-  isAvailable: { type: Boolean, default: false }
+  isAvailable: { type: Boolean, default: false },
+  // Refer & earn: every customer gets a shareable code; referralRewardedAt marks that the referrer was paid.
+  referralCode: { type: String, default: undefined },
+  referredBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+  referralRewardedAt: { type: Date, default: null }
 }, { timestamps: true });
+userSchema.index({ referralCode: 1 }, { unique: true, partialFilterExpression: { referralCode: { $type: "string" } } });
 
 const restaurantSchema = new Schema({
   owner: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
@@ -73,6 +78,7 @@ const cartSchema = new Schema({
   }]
 }, { timestamps: true });
 
+const PAYMENT_METHOD_VALUES = ["cod", "upi", "card", "netbanking", "razorpay"];
 const orderSchema = new Schema({
   groupOrderId: { type: String, required: true, index: true },
   orderNumber: { type: String, required: true, unique: true },
@@ -85,24 +91,110 @@ const orderSchema = new Schema({
   deliveryAddress: { name: String, phone: String, street: String, city: String, state: String, postalCode: String, instructions: String, latitude: Number, longitude: Number },
   subtotal: Number, tax: Number, deliveryFee: Number, discount: { type: Number, default: 0 },
   totalAmount: Number,
-  paymentMethod: { type: String, enum: ["cod", "upi", "netbanking", "razorpay"], default: "cod" },
-  paymentStatus: { type: String, enum: ["pending", "paid", "failed", "refunded"], default: "pending" },
-  orderStatus: { type: String, enum: ["placed", "accepted", "rejected", "preparing", "ready", "picked_up", "on_the_way", "delivered", "cancelled"], default: "placed" },
+  payment: { type: Schema.Types.ObjectId, ref: "Payment", default: null, index: true },
+  paymentMethod: { type: String, enum: PAYMENT_METHOD_VALUES, default: "cod" },
+  paymentStatus: { type: String, enum: ["pending", "paid", "failed", "refund_pending", "partially_refunded", "refunded", "cancelled"], default: "pending" },
+  refundedAmount: { type: Number, default: 0 },
+  // awaiting_payment: an online checkout that hasn't been paid yet, so the restaurant can't see it.
+  orderStatus: { type: String, enum: ["awaiting_payment", "placed", "accepted", "rejected", "preparing", "ready", "picked_up", "on_the_way", "delivered", "cancelled"], default: "placed" },
+  // When the order reached the restaurant: at checkout for COD, once paid for online orders.
+  placedAt: { type: Date, default: null },
+  cancelledAt: Date,
+  cancelledBy: { type: String, enum: ["customer", "restaurant", "system", "admin", null], default: null },
+  cancellationReason: String,
   delivery: { type: Schema.Types.ObjectId, ref: "Delivery", default: null }
 }, { timestamps: true });
 
+// Every state change is appended here so support can see exactly what happened to a payment.
+const paymentEventSchema = new Schema({
+  type: { type: String, required: true },
+  message: String,
+  source: { type: String, default: "system" },
+  data: Schema.Types.Mixed,
+  at: { type: Date, default: Date.now }
+}, { _id: false });
+
+// "started" marks an open gateway session; each failed try is recorded as its own "failed" entry.
+const paymentAttemptSchema = new Schema({
+  status: { type: String, enum: ["started", "failed", "captured", "dismissed"], default: "started" },
+  method: String,
+  providerPaymentId: String,
+  errorCode: String,
+  errorReason: String,
+  startedAt: { type: Date, default: Date.now },
+  completedAt: Date
+});
+
+const refundSchema = new Schema({
+  order: { type: Schema.Types.ObjectId, ref: "Order", default: null },
+  amount: { type: Number, required: true, min: 0 },
+  reason: { type: String, default: "" },
+  // late_capture: money that arrived after the checkout had closed, returned automatically.
+  kind: { type: String, enum: ["order", "manual", "late_capture"], default: "order" },
+  status: { type: String, enum: ["pending", "processed", "failed"], default: "pending" },
+  providerPaymentId: String,
+  providerRefundId: String,
+  failureReason: String,
+  initiatedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
+  processedAt: Date
+});
+
 const paymentSchema = new Schema({
   groupOrderId: { type: String, required: true, index: true },
+  // "food" payments settle restaurant Orders; "grocery" payments settle one GroceryOrder.
+  kind: { type: String, enum: ["food", "grocery"], default: "food" },
+  groceryOrder: { type: Schema.Types.ObjectId, ref: "GroceryOrder", default: null },
   order: { type: Schema.Types.ObjectId, ref: "Order" },
-  customer: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  orders: [{ type: Schema.Types.ObjectId, ref: "Order" }],
+  customer: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
   amount: Number,
   currency: { type: String, default: "INR" },
-  method: { type: String, enum: ["cod", "upi", "netbanking", "razorpay"], default: "cod" },
-  status: { type: String, enum: ["created", "pending", "paid", "failed", "refunded"], default: "pending" },
-  providerOrderId: String,
+  method: { type: String, enum: PAYMENT_METHOD_VALUES, default: "cod" },
+  gateway: { type: String, enum: ["cash", "razorpay", "mock"], default: "cash" },
+  // created: checkout still being assembled. pending: awaiting money. failed: last try failed, still retryable.
+  status: { type: String, enum: ["created", "pending", "authorized", "paid", "failed", "expired", "cancelled", "partially_refunded", "refunded"], default: "pending" },
+  idempotencyKey: { type: String, default: undefined },
+  requestHash: String,
+  cartSnapshot: [{ _id: false, foodItem: { type: Schema.Types.ObjectId, ref: "FoodItem" }, restaurant: { type: Schema.Types.ObjectId, ref: "Restaurant" }, quantity: Number }],
+  amountPaid: { type: Number, default: 0 },
+  amountRefunded: { type: Number, default: 0 },
+  providerOrderId: { type: String, index: true, sparse: true },
   providerPaymentId: String,
-  providerSignature: String
+  providerSignature: String,
+  attempts: { type: [paymentAttemptSchema], default: [] },
+  refunds: { type: [refundSchema], default: [] },
+  events: { type: [paymentEventSchema], default: [] },
+  expiresAt: { type: Date, default: null },
+  paidAt: Date,
+  lastError: String
 }, { timestamps: true });
+paymentSchema.index({ customer: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $type: "string" } } });
+paymentSchema.index({ status: 1, expiresAt: 1 });
+paymentSchema.index({ "refunds.status": 1 });
+paymentSchema.index({ "refunds.providerRefundId": 1 }, { sparse: true });
+
+// One row per customer per day: the unique index makes "one spin a day" impossible to bypass with parallel requests.
+const dailySpinSchema = new Schema({
+  user: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  day: { type: String, required: true },
+  streak: { type: Number, default: 1 },
+  prizeId: String,
+  label: String,
+  coupon: { type: Schema.Types.ObjectId, ref: "Coupon", default: null }
+}, { timestamps: true });
+dailySpinSchema.index({ user: 1, day: 1 }, { unique: true });
+
+// Gateways retry webhook deliveries; remembering event IDs makes processing exactly-once.
+const webhookEventSchema = new Schema({
+  provider: { type: String, required: true },
+  eventId: { type: String, required: true },
+  type: String,
+  processedAt: { type: Date, default: Date.now }
+});
+webhookEventSchema.index({ provider: 1, eventId: 1 }, { unique: true });
+webhookEventSchema.index({ processedAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 });
 
 const deliverySchema = new Schema({
   order: { type: Schema.Types.ObjectId, ref: "Order", required: true, unique: true },
@@ -135,7 +227,14 @@ const couponSchema = new Schema({
   code: { type: String, unique: true, uppercase: true },
   discountType: { type: String, enum: ["percentage", "fixed"], default: "percentage" },
   discountValue: Number, minOrder: { type: Number, default: 0 },
-  maxDiscount: Number, expiresAt: Date, isActive: { type: Boolean, default: true }
+  maxDiscount: Number, expiresAt: Date, isActive: { type: Boolean, default: true },
+  usedCount: { type: Number, default: 0 },
+  // Personal, single-use coupons (spin prizes, referral rewards). Public campaign coupons have no owner.
+  owner: { type: Schema.Types.ObjectId, ref: "User", default: null, index: true },
+  title: { type: String, default: "" },
+  source: { type: String, enum: ["campaign", "spin", "streak", "welcome", "referral"], default: "campaign" },
+  usedAt: { type: Date, default: null },
+  usedFor: { type: String, default: null }
 }, { timestamps: true });
 
 const notificationSchema = new Schema({
@@ -195,13 +294,24 @@ const groceryProductSchema = new Schema({
 const groceryOrderSchema = new Schema({
   orderNumber: { type: String, unique: true, required: true },
   user: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
-  items: [{ product: { type: Schema.Types.ObjectId, ref: "GroceryProduct" }, name: String, quantity: Number, price: Number }],
-  address: { name: String, phone: String, street: String, city: String, state: String, postalCode: String },
-  subtotal: Number, deliveryFee: Number, totalAmount: Number,
-  paymentMethod: { type: String, enum: ["cod", "upi", "netbanking", "razorpay"], default: "cod" },
-  paymentStatus: { type: String, enum: ["pending", "paid", "failed", "refunded"], default: "pending" },
-  status: { type: String, enum: ["placed", "packed", "out_for_delivery", "delivered", "cancelled"], default: "placed" }
+  items: [{ product: { type: Schema.Types.ObjectId, ref: "GroceryProduct" }, name: String, quantity: Number, price: Number, mrp: Number, unit: String, image: String }],
+  address: { label: String, name: String, phone: String, street: String, city: String, state: String, postalCode: String },
+  subtotal: Number, deliveryFee: Number, tip: { type: Number, default: 0 }, totalAmount: Number,
+  // express: as soon as possible; scheduled: a two-hour window the customer picked.
+  deliverySlot: { kind: { type: String, enum: ["express", "scheduled"], default: "express" }, label: String, start: Date, end: Date },
+  instructions: { type: String, default: "" },
+  substitution: { type: String, enum: ["call", "similar", "remove"], default: "call" },
+  paymentMethod: { type: String, enum: ["cod", "upi", "card", "netbanking", "razorpay"], default: "cod" },
+  paymentStatus: { type: String, enum: ["pending", "paid", "failed", "cancelled", "refund_pending", "partially_refunded", "refunded"], default: "pending" },
+  payment: { type: Schema.Types.ObjectId, ref: "Payment", default: null },
+  refundedAmount: { type: Number, default: 0 },
+  // awaiting_payment: stock is reserved but the shop doesn't pack it until the online payment succeeds.
+  status: { type: String, enum: ["awaiting_payment", "placed", "packed", "out_for_delivery", "delivered", "cancelled"], default: "placed" },
+  placedAt: Date, cancelledAt: Date, cancelledBy: String, cancellationReason: String,
+  idempotencyKey: { type: String, default: undefined },
+  requestHash: String
 }, { timestamps: true });
+groceryOrderSchema.index({ user: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $type: "string" } } });
 
 const membershipSchema = new Schema({
   user: { type: Schema.Types.ObjectId, ref: "User", unique: true, required: true },
@@ -233,8 +343,13 @@ const experienceSchema = new Schema({
   date: Date,
   time: String,
   image: String,
+  category: { type: String, default: "Food & drinks" },
+  duration: String,
+  highlights: { type: [String], default: undefined },
   price: { type: Number, default: 0 },
   capacity: { type: Number, default: 50 },
+  // Seats taken by confirmed bookings. Updated atomically so two people can't both get the last seat.
+  booked: { type: Number, min: 0 },
   isActive: { type: Boolean, default: true }
 }, { timestamps: true });
 
@@ -253,6 +368,8 @@ export const FoodItem = model("FoodItem", foodItemSchema);
 export const Cart = model("Cart", cartSchema);
 export const Order = model("Order", orderSchema);
 export const Payment = model("Payment", paymentSchema);
+export const WebhookEvent = model("WebhookEvent", webhookEventSchema);
+export const DailySpin = model("DailySpin", dailySpinSchema);
 export const Delivery = model("Delivery", deliverySchema);
 export const Address = model("Address", addressSchema);
 export const Review = model("Review", reviewSchema);
