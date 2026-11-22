@@ -102,7 +102,23 @@ const orderSchema = new Schema({
   cancelledAt: Date,
   cancelledBy: { type: String, enum: ["customer", "restaurant", "system", "admin", null], default: null },
   cancellationReason: String,
-  delivery: { type: Schema.Types.ObjectId, ref: "Delivery", default: null }
+  delivery: { type: Schema.Types.ObjectId, ref: "Delivery", default: null },
+  // When each status was reached, for the tracking timeline and the rider-position estimate.
+  statusHistory: { type: [{ _id: false, status: String, at: Date }], default: [] },
+  // Map geometry for live tracking, worked out once (geocoding + road route) and reused. Points are [lat, lng].
+  tracking: {
+    pickup: { type: [Number], default: undefined },
+    drop: { type: [Number], default: undefined },
+    path: { type: [[Number]], default: undefined },
+    distanceM: Number,
+    durationS: Number,
+    source: String,
+    dropPrecision: String,
+    // True when the kitchen is too far from the address to draw a real route, so a nearby point stands in.
+    approximatePickup: Boolean,
+    kitchenDistanceM: Number,
+    computedAt: Date
+  }
 }, { timestamps: true });
 
 // Every state change is appended here so support can see exactly what happened to a payment.
@@ -204,7 +220,10 @@ const deliverySchema = new Schema({
   status: { type: String, enum: ["assigned", "accepted", "picked_up", "on_the_way", "delivered", "failed"], default: "assigned" },
   estimatedDeliveryTime: Date,
   actualDeliveryTime: Date,
-  currentLocation: { type: pointSchema, default: undefined }
+  currentLocation: { type: pointSchema, default: undefined },
+  locationUpdatedAt: { type: Date, default: null },
+  // Rider's heading in degrees (0 = north), so the map can point the scooter the right way.
+  heading: { type: Number, default: null }
 }, { timestamps: true });
 
 const addressSchema = new Schema({

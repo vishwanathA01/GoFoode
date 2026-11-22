@@ -12,4 +12,11 @@ api.interceptors.request.use(config => {
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
+// Tell the header (cart badge) whenever the cart changes: any successful cart edit or checkout.
+api.interceptors.response.use(response => {
+  const method = (response.config?.method || "get").toLowerCase();
+  const url = response.config?.url || "";
+  if (method !== "get" && /^\/?(cart|checkout)\b/.test(url) && typeof window !== "undefined") window.dispatchEvent(new CustomEvent("gofoode:cart-changed"));
+  return response;
+});
 export default api;

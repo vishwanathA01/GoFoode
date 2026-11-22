@@ -1,5 +1,5 @@
 export const groceryProducts = [
-  { name: "Amul Taaza Milk", category: "Dairy", description: "Fresh toned milk", price: 29, mrp: 32, unit: "500 ml", image: "https://images.unsplash.com/photo-1563636619-e9143da7973b?w=500" },
+  { name: "Amul Taaza Milk", category: "Dairy", description: "Fresh toned milk", price: 29, mrp: 32, unit: "500 ml", image: "https://images.unsplash.com/photo-1639151082235-406d8eb262b9?w=500&fit=crop" },
   { name: "Farm Fresh Bananas", category: "Fruits", description: "Naturally sweet bananas", price: 49, mrp: 60, unit: "6 pieces", image: "https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?w=500" },
   { name: "Brown Bread", category: "Bakery", description: "Soft whole wheat bread", price: 45, mrp: 55, unit: "400 g", image: "https://images.unsplash.com/photo-1509440159596-0249088772ff?w=500" },
   { name: "Classic Potato Chips", category: "Snacks", description: "Crispy salted potato chips", price: 20, mrp: 20, unit: "1 pack", image: "https://images.unsplash.com/photo-1566478989037-eec170784d0b?w=500" },
@@ -23,7 +23,7 @@ export const groceryProducts = [
   { name: "Sparkling Lemon Drink", category: "Beverages", description: "Chilled citrus-flavoured refreshment", price: 40, mrp: 45, unit: "750 ml", image: "https://images.unsplash.com/photo-1523677011781-c91d1bbe2f9e?w=500" },
   { name: "Green Tea", category: "Beverages", description: "Light and refreshing green tea bags", price: 119, mrp: 140, unit: "25 bags", image: "https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=500" },
   { name: "Dishwashing Liquid", category: "Home care", description: "Everyday grease-cutting dish soap", price: 89, mrp: 105, unit: "500 ml", image: "https://images.unsplash.com/photo-1585421514284-efb74c2b69ba?w=500" },
-  { name: "Laundry Detergent", category: "Home care", description: "Fresh-scent detergent for daily laundry", price: 149, mrp: 175, unit: "1 kg", image: "https://images.unsplash.com/photo-1604335399105-a0c585fd81a1?w=500" },
+  { name: "Laundry Detergent", category: "Home care", description: "Fresh-scent detergent for daily laundry", price: 149, mrp: 175, unit: "1 kg", image: "https://images.unsplash.com/photo-1624372635310-01d078c05dd9?w=500&fit=crop" },
   { name: "Sweet Seedless Grapes", category: "Fruits", description: "Juicy seedless green grapes, washed and ready to enjoy", price: 99, mrp: 120, unit: "500 g", image: "https://images.unsplash.com/photo-1537640538966-79f369143f8f?w=500" },
   { name: "Fresh Avocados", category: "Fruits", description: "Creamy ripe avocados for toast, salads and bowls", price: 129, mrp: 150, unit: "2 pieces", image: "https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?w=500" },
   { name: "Sweet Corn", category: "Vegetables", description: "Tender sweet corn kernels for quick meals", price: 59, mrp: 69, unit: "2 pieces", image: "https://images.unsplash.com/photo-1551754655-cd27e38d2076?w=500" },

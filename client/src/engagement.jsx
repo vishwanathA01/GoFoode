@@ -2,7 +2,7 @@
 // the food mood finder and the "install the app" prompt.
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Check, Copy, Flame, Gift, Lock, Share2, Shuffle, Sparkles, Ticket, Timer, Trophy, Users, X, Zap } from "lucide-react";
+import { ArrowRight, Bike, CakeSlice, Check, Copy, Crown, Flame, Gift, Lock, Salad, Share2, Shuffle, Soup, Sparkles, Ticket, Timer, Trophy, Users, X, Zap } from "lucide-react";
 import { useAuth } from "./AuthContext";
 import api from "./api";
 
@@ -180,7 +180,7 @@ export function RewardsPage() {
       <div className="eg-win">
         <Confetti/>
         <button type="button" className="eg-win-close" aria-label="Close" onClick={() => setResult(null)}><X size={18}/></button>
-        <span className="eg-win-badge">{result.bonus ? "🔥" : "🎉"}</span>
+        <span className="eg-win-badge">{result.bonus ? <Flame size={22}/> : <Gift size={22}/>}</span>
         <small>{result.bonus ? "7-day streak bonus" : "You won"}</small>
         <h2 id="eg-win-title">{result.prize.label}</h2>
         <p>{result.prize.detail}. It's in your wallet and valid for 3 days.</p>
@@ -194,7 +194,7 @@ export function RewardsPage() {
         <div className="eg-card-head"><div><span className="eg-kicker"><Ticket size={14}/> Your wallet</span><h2 id="eg-wallet-title">Coupons ready to use</h2></div><span className="eg-count">{data?.coupons.length || 0}</span></div>
         {!data ? <div className="eg-skeleton"><i/><i/></div>
           : data.coupons.length ? <div className="eg-coupons">{data.coupons.map(coupon => <CouponCard key={coupon._id} coupon={coupon} now={now} onUse={() => navigate("/food")}/>)}</div>
-          : <div className="eg-empty"><span aria-hidden="true">🎟️</span><p>No coupons yet. Spin the wheel or invite a friend to fill your wallet.</p></div>}
+          : <div className="eg-empty"><span aria-hidden="true"><Ticket size={28}/></span><p>No coupons yet. Spin the wheel or invite a friend to fill your wallet.</p></div>}
         <p className="eg-fine">Your coupons also appear at checkout under “Offers & coupons”. Each one can be used once.</p>
       </section>
       {data ? <ReferralCard referral={data.referral}/> : <section className="eg-card eg-skeleton"><i/><i/><i/></section>}
@@ -257,7 +257,7 @@ export function PulseSection() {
       <div className="hx-head"><div><span className="hx-kicker"><Flame size={13}/> Trending this week</span><h2>What everyone's <em>ordering right now.</em></h2><p>Ranked by real orders from the last 7 days. Tap a dish to see what's in it.</p></div><Link to="/food" className="hx-link">See all dishes <ArrowRight size={15}/></Link></div>
       {current && <div className="eg-ticker" role="status" aria-live="polite">
         <span className="eg-live"><i/> Live</span>
-        <span className="eg-ticker-text" key={tick}>🛵 <b>{current.dish}</b>{current.more > 0 && ` + ${current.more} more`} from {current.restaurant}{current.city && ` · ${current.city}`} <em>· {ago(current.at)}</em></span>
+        <span className="eg-ticker-text" key={tick}><Bike size={14} aria-hidden="true"/> <b>{current.dish}</b>{current.more > 0 && ` + ${current.more} more`} from {current.restaurant}{current.city && ` · ${current.city}`} <em>· {ago(current.at)}</em></span>
         {pulse.ordersToday > 0 && <span className="eg-today">{pulse.ordersToday} {pulse.ordersToday === 1 ? "order" : "orders"} today</span>}
       </div>}
       <div className="eg-trending">{pulse.trending.slice(0, 8).map((dish, index) => <Link to={`/food?dish=${dish._id}`} className="eg-trend" key={dish._id}>
@@ -273,12 +273,12 @@ export function PulseSection() {
 // Homepage: food mood finder
 // ---------------------------------------------------------------------------------------------------------
 const moods = [
-  { id: "comfort", emoji: "🍲", label: "Comfort food", test: /butter|cheese|biryani|dal|masala|burger|pizza|paneer|makhani|noodle/ , cuisines: /indian|burger|pizza|italian|fast food/ },
-  { id: "healthy", emoji: "🥗", label: "Light & healthy", test: /salad|bowl|quinoa|grilled|fresh|avocado|green/, cuisines: /healthy|salad/ },
-  { id: "spicy", emoji: "🌶️", label: "Something spicy", test: /chilli|chili|spicy|pepper|tandoori|hot|schezwan/, cuisines: /chinese|indian/ },
-  { id: "sweet", emoji: "🍰", label: "Sweet tooth", test: /chocolate|cake|sweet|brownie|cheesecake|tiramisu|dessert/, cuisines: /dessert|bakery/ },
-  { id: "quick", emoji: "⚡", label: "Super quick", test: /./, cuisines: /./ },
-  { id: "treat", emoji: "👑", label: "Treat myself", test: /special|premium|pesto|biryani|cheesecake|tikka/, cuisines: /./ }
+  { id: "comfort", icon: Soup, label: "Comfort food", test: /butter|cheese|biryani|dal|masala|burger|pizza|paneer|makhani|noodle/ , cuisines: /indian|burger|pizza|italian|fast food/ },
+  { id: "healthy", icon: Salad, label: "Light & healthy", test: /salad|bowl|quinoa|grilled|fresh|avocado|green/, cuisines: /healthy|salad/ },
+  { id: "spicy", icon: Flame, label: "Something spicy", test: /chilli|chili|spicy|pepper|tandoori|hot|schezwan/, cuisines: /chinese|indian/ },
+  { id: "sweet", icon: CakeSlice, label: "Sweet tooth", test: /chocolate|cake|sweet|brownie|cheesecake|tiramisu|dessert/, cuisines: /dessert|bakery/ },
+  { id: "quick", icon: Zap, label: "Super quick", test: /./, cuisines: /./ },
+  { id: "treat", icon: Crown, label: "Treat myself", test: /special|premium|pesto|biryani|cheesecake|tikka/, cuisines: /./ }
 ];
 function moodScore(dish, mood) {
   const text = `${dish.name} ${dish.description || ""} ${(dish.ingredients || []).join(" ")}`.toLowerCase();
@@ -295,7 +295,7 @@ function moodScore(dish, mood) {
 function moodReasons(dish, mood) {
   const reasons = [];
   if (dish.preparationTime) reasons.push(`Ready in ${dish.preparationTime} min`);
-  if (mood.id === "spicy" && dish.spiceLevel) reasons.push(`${dish.spiceLevel} 🌶️`);
+  if (mood.id === "spicy" && dish.spiceLevel) reasons.push(`${dish.spiceLevel} spice`);
   if (mood.id === "healthy" && dish.calories) reasons.push(`${dish.calories} kcal`);
   if (dish.isBestseller) reasons.push("Bestseller");
   return reasons.slice(0, 2);
@@ -320,9 +320,9 @@ export function MoodFinder({ dishes }) {
     <div className="hx-wrap">
       <div className="hx-head"><div><span className="hx-kicker"><Sparkles size={13}/> Can't decide?</span><h2>What are you <em>in the mood for?</em></h2><p>Pick a mood and we'll match you with dishes from kitchens near you.</p></div></div>
       <div className="eg-mood-panel">
-        <div className="eg-moods" role="radiogroup" aria-label="Mood">{moods.map(entry => <button type="button" role="radio" aria-checked={mood.id === entry.id} key={entry.id} className={mood.id === entry.id ? "on" : ""} onClick={() => { setMood(entry); setSeed(0); }}><span aria-hidden="true">{entry.emoji}</span>{entry.label}</button>)}</div>
+        <div className="eg-moods" role="radiogroup" aria-label="Mood">{moods.map(entry => <button type="button" role="radio" aria-checked={mood.id === entry.id} key={entry.id} className={mood.id === entry.id ? "on" : ""} onClick={() => { setMood(entry); setSeed(0); }}><span aria-hidden="true"><entry.icon size={20}/></span>{entry.label}</button>)}</div>
         <div className="eg-mood-filters">
-          <div className="eg-seg" role="radiogroup" aria-label="Diet">{[["any", "Any"], ["veg", "🟢 Veg"], ["nonveg", "🔴 Non-veg"]].map(([id, label]) => <button type="button" role="radio" aria-checked={diet === id} key={id} className={diet === id ? "on" : ""} onClick={() => setDiet(id)}>{label}</button>)}</div>
+          <div className="eg-seg" role="radiogroup" aria-label="Diet">{[["any", "Any"], ["veg", "Veg"], ["nonveg", "Non-veg"]].map(([id, label]) => <button type="button" role="radio" aria-checked={diet === id} key={id} className={diet === id ? "on" : ""} onClick={() => setDiet(id)}>{id !== "any" && <i className={`eg-diet-dot ${id}`} aria-hidden="true"/>}{label}</button>)}</div>
           <div className="eg-seg" role="radiogroup" aria-label="Budget">{[[0, "Any budget"], [200, "Under ₹200"], [300, "Under ₹300"]].map(([value, label]) => <button type="button" role="radio" aria-checked={budget === value} key={value} className={budget === value ? "on" : ""} onClick={() => setBudget(value)}>{label}</button>)}</div>
           <button type="button" className="eg-surprise" onClick={() => setSeed(value => value + 1)}><Shuffle size={15}/> Surprise me</button>
         </div>

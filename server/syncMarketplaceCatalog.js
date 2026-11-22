@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import { config } from "./config.js";
 import { User, Restaurant, FoodItem, Experience } from "./models.js";
+import { demoAddress, demoRestaurants, dishPhotoFixes } from "./demoCatalog.js";
 
 const catalog = [
   {
@@ -84,11 +85,6 @@ const seedEventDetails = {
   "Pizza & Paint Night": { category: "Workshop", duration: "3 hours", highlights: ["All art supplies included", "3 pizza tasters", "Take your canvas home"], description: "Paint your own mini canvas with a local artist while a pizza tasting menu comes out of the oven.", image: "https://images.unsplash.com/photo-1757085242652-f8cd4d3de889?w=900&q=75&auto=format&fit=crop" },
   "Street Food Trail": { category: "Food walk", duration: "2 hours", highlights: ["6 tasting stops", "Local host", "Vegetarian friendly"], description: "Samosas, chaat and kulhad chai: a hosted tasting walk through the city's best-loved street stalls.", image: "https://images.unsplash.com/photo-1732519970445-8f2d6998961f?w=900&q=75&auto=format&fit=crop" }
 };
-// Demo restaurants that lost their cover photo get a real one back. Covers an owner uploaded are never touched.
-const demoCovers = {
-  "GoFoode Demo Burger House": "https://images.unsplash.com/photo-1550547660-d9450f859349?w=900&q=75&auto=format&fit=crop",
-  "GoFoode Demo Spice Kitchen": "https://images.unsplash.com/photo-1773419808002-bab9e1f840a0?w=900&q=75&auto=format&fit=crop"
-};
 
 await mongoose.connect(config.mongoUri);
 try {
@@ -108,7 +104,7 @@ try {
         coverImage: entry.coverImage,
         deliveryTime: entry.deliveryTime,
         rating: entry.rating,
-        address: { city: "Faridabad", state: "Haryana" },
+        address: demoAddress(demoRestaurants.find(demo => demo.name === entry.name)),
         status: "approved",
         isOpen: true
       });
@@ -140,11 +136,24 @@ try {
     const existing = await Experience.findOne({ title });
     if (existing) await Experience.updateOne({ _id: existing._id }, { $set: { ...details, ...(existing.date ? { date: onSundayIfNamed(title, existing.date) } : {}) } });
   }
-  let coversFixed = 0;
-  for (const [name, coverImage] of Object.entries(demoCovers)) {
-    const result = await Restaurant.updateMany({ owner: owner._id, name, $or: [{ coverImage: null }, { coverImage: "" }, { coverImage: { $exists: false } }] }, { $set: { coverImage } });
-    coversFixed += result.modifiedCount;
+  // Demo kitchens get their brand name, street address and map position (the older "GoFoode Demo …"
+  // placeholders are renamed). A cover photo is only filled in when the kitchen has none.
+  let coversFixed = 0, renamed = 0, placed = 0;
+  for (const demo of demoRestaurants) {
+    const restaurant = await Restaurant.findOne({ owner: owner._id, name: { $in: [demo.name, demo.legacyName].filter(Boolean) } });
+    if (!restaurant) continue;
+    const changes = { address: { ...demoAddress(demo) } };
+    if (restaurant.name !== demo.name) { changes.name = demo.name; if (demo.description) changes.description = demo.description; renamed += 1; }
+    if (!restaurant.coverImage && demo.coverImage) { changes.coverImage = demo.coverImage; coversFixed += 1; }
+    await Restaurant.updateOne({ _id: restaurant._id }, { $set: changes });
+    placed += 1;
   }
+  let dishPhotos = 0;
+  for (const fix of dishPhotoFixes) dishPhotos += (await FoodItem.updateMany({ name: fix.dish, image: fix.from }, { $set: { image: fix.image } })).modifiedCount;
+  // The demo customer used a stock portrait; accounts without their own photo show initials instead.
+  await User.updateOne({ email: "customer@gofoode.demo", profileImage: "/images/avatar-demo-customer.jpg" }, { $set: { profileImage: "" } });
+  if (renamed || placed) console.log(`Demo kitchens: ${renamed} renamed, ${placed} given a street address and map position.`);
+  if (dishPhotos) console.log(`Replaced ${dishPhotos} broken or mismatched dish photo(s).`);
   // Wok & Bowl Express first shipped with the same dumpling photo as GoFoode Demo Wok & Bowl. Give it its own, unless the owner changed it.
   const wok = await Restaurant.updateOne({ owner: owner._id, name: "Wok & Bowl Express", coverImage: "https://images.unsplash.com/photo-1563245372-f21724e3856d?w=900" }, { $set: { coverImage: "https://images.unsplash.com/photo-1569718212165-3a8278d5f624?w=900&q=75&auto=format&fit=crop" } });
   coversFixed += wok.modifiedCount;

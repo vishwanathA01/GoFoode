@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const chatbotProvider = (process.env.CHATBOT_PROVIDER || "openai-compatible").toLowerCase();
-const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+const clientUrl = process.env.CLIENT_URL || "http://localhost:5180";
 
 export function isAllowedClientOrigin(origin) {
   if (!origin || origin === clientUrl) return true;

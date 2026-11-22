@@ -138,7 +138,7 @@ if (!(await waitForApi(apiPort, api))) {
   if (!stopping) { console.error(color("1;31", "\n✗ The API didn't come up within 30 seconds. See the [api] messages above.")); stopAll(1); }
 } else {
   say(`API ready on http://localhost:${apiPort}`);
-  const webPort = await findFreePort(Number(process.env.WEB_PORT || 5173));
+  const webPort = await findFreePort(Number(process.env.WEB_PORT || 5180));
   say("Starting the website…");
   const web = run("web", "35", clientDir, ["run", "dev", "--", "--port", String(webPort), "--strictPort"], { GOFOODE_API_PORT: String(apiPort) });
   children.push(web);

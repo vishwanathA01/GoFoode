@@ -96,7 +96,8 @@ export function AuthProvider({ children }) {
     // A place picked from search or a saved address keeps its coordinates, so checkout can use them.
     const latitude = Number.isFinite(Number(fields.latitude)) && fields.latitude !== null && fields.latitude !== "" ? Number(fields.latitude) : undefined;
     const longitude = Number.isFinite(Number(fields.longitude)) && fields.longitude !== null && fields.longitude !== "" ? Number(fields.longitude) : undefined;
-    const next = { area, city, state, postalCode, label, ...(latitude !== undefined && longitude !== undefined ? { latitude, longitude } : {}), source: fields.source || "manual", updatedAt: new Date().toISOString() };
+    const street = String(fields.street || "").trim();
+    const next = { area, city, state, postalCode, ...(street ? { street } : {}), label, ...(latitude !== undefined && longitude !== undefined ? { latitude, longitude } : {}), source: fields.source || "manual", updatedAt: new Date().toISOString() };
     localStorage.setItem("gofoode_location", JSON.stringify(next));
     try {
       const recent = JSON.parse(localStorage.getItem("gofoode_recent_locations") || "[]").filter(entry => entry?.label && entry.label !== label);
