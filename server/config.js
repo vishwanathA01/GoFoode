@@ -21,17 +21,20 @@ export function isAllowedClientOrigin(origin) {
 const razorpayKeyId = (process.env.RAZORPAY_KEY_ID || "").trim();
 const razorpayKeySecret = (process.env.RAZORPAY_KEY_SECRET || "").trim();
 const isProduction = process.env.NODE_ENV === "production";
+// The built-in test gateway moves no money. Production only offers it when ALLOW_TEST_PAYMENTS=true, for a demo
+// deployment; checkout then labels every online payment as a test.
+const testPaymentsAllowed = !isProduction || (process.env.ALLOW_TEST_PAYMENTS || "").trim().toLowerCase() === "true";
 
 // PAYMENT_GATEWAY: auto (default) | razorpay | mock | none.
-// "auto" uses Razorpay when keys are set, otherwise the built-in test gateway outside production.
+// "auto" uses Razorpay when keys are set, otherwise the built-in test gateway where test payments are allowed.
 function resolvePaymentGateway() {
   const requested = (process.env.PAYMENT_GATEWAY || "auto").trim().toLowerCase();
   const hasRazorpay = Boolean(razorpayKeyId && razorpayKeySecret);
   if (requested === "razorpay") return hasRazorpay ? "razorpay" : null;
-  if (requested === "mock") return isProduction ? null : "mock";
+  if (requested === "mock") return testPaymentsAllowed ? "mock" : null;
   if (["none", "off", "disabled"].includes(requested)) return null;
   if (hasRazorpay) return "razorpay";
-  return isProduction ? null : "mock";
+  return testPaymentsAllowed ? "mock" : null;
 }
 const boundedNumber = (value, fallback, min, max) => {
   const number = Number(value);
@@ -42,6 +45,7 @@ export const config = {
   port: process.env.PORT || 5001,
   payments: {
     gateway: resolvePaymentGateway(),
+    testPaymentsAllowed,
     razorpayKeyId,
     razorpayKeySecret,
     razorpayWebhookSecret: (process.env.RAZORPAY_WEBHOOK_SECRET || "").trim(),

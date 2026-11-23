@@ -60,11 +60,12 @@ Set these environment variables on the Vercel project (Production):
 | `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` | Long random strings. |
 | `CLIENT_URL` | The site's address, e.g. `https://gofoode.vercel.app`. |
 | `VITE_DISABLE_SOCKETS` | `true`. Vercel can't hold websocket connections, so pages poll instead (order tracking refreshes every ~8 seconds). |
+| `ALLOW_TEST_PAYMENTS` | `true` to offer UPI, card and net banking through the built-in test gateway (no real money) on a demo deployment. Remove it once Razorpay keys are set. |
 | `CHATBOT_*` | Optional, as in `server/.env.example`. |
 
 Don't set `NODE_ENV`: it also applies to the build, where it would stop npm installing Vite. The function switches to production mode by itself (`server/vercelEnv.js`). Functions run in Mumbai (`bom1`), next to an Atlas cluster in `ap-south-1`; keep the two in the same region, or every request crosses continents.
 
-Fill a new database with `MONGODB_URI="<atlas uri>" npm run seed --prefix server`, then `npm run sync-marketplace` and `npm run sync-grocery` the same way. On Vercel, online payments stay off (cash on delivery only) until Razorpay keys are set, and the background payment sweep doesn't run: overdue checkouts expire when they're next read.
+Fill a new database with `MONGODB_URI="<atlas uri>" npm run seed --prefix server`, then `npm run sync-marketplace` and `npm run sync-grocery` the same way. On Vercel, online payments stay off (cash on delivery only) until Razorpay keys or `ALLOW_TEST_PAYMENTS=true` are set, and the background payment sweep doesn't run: overdue checkouts expire when they're next read.
 
 ## Demo accounts
 The seed script creates:
@@ -190,7 +191,7 @@ This is an advanced academic/demo codebase, not a production-certified logistics
 ## Payments
 Food checkout supports UPI, cards and net banking through Razorpay, plus cash on delivery.
 
-**Gateways.** `PAYMENT_GATEWAY=auto` (the default) uses Razorpay when `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` are set. Otherwise, outside production, it uses a built-in test gateway that moves no money. In production with no keys, only cash on delivery is offered. The test gateway's payment window can simulate a success, a bank decline, or a payment where the app loses its connection.
+**Gateways.** `PAYMENT_GATEWAY=auto` (the default) uses Razorpay when `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` are set. Otherwise, outside production, it uses a built-in test gateway that moves no money. In production with no keys, only cash on delivery is offered, unless `ALLOW_TEST_PAYMENTS=true` is set for a demo deployment: then the test gateway is offered and checkout labels every online payment as a test. The test gateway's payment window can simulate a success, a bank decline, or a payment where the app loses its connection.
 
 **How an online order flows.** Checkout creates the orders in `awaiting_payment` and opens a payment window. Restaurants don't see these orders until the payment succeeds. A failed or abandoned payment can be retried, switched to cash on delivery, or cancelled. If nothing happens for `PAYMENT_WINDOW_MINUTES` (default 15), the orders are cancelled and the items go back into the customer's cart.
 

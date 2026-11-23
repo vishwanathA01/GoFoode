@@ -1024,7 +1024,7 @@ router.post("/payments/:id/cancel", protect, allow("customer"), asyncHandler(asy
 // Test gateway only: plays the part of the payment provider's checkout window.
 router.post("/payments/:id/simulate", protect, allow("customer"), asyncHandler(async (req, res) => {
   const payment = await loadOwnPayment(req.params.id, req.user);
-  if (payment.gateway !== "mock" || process.env.NODE_ENV === "production") throw new PaymentError("Test payments are only available in test mode.", { status: 404, code: "NOT_FOUND" });
+  if (payment.gateway !== "mock" || !config.payments.testPaymentsAllowed) throw new PaymentError("Test payments are only available in test mode.", { status: 404, code: "NOT_FOUND" });
   if (!payment.providerOrderId) throw new PaymentError("Start the payment before completing it.", { status: 409, code: "NO_SESSION" });
   const outcome = ["success", "failure", "disconnect"].includes(req.body?.outcome) ? req.body.outcome : "success";
   const method = normalizeMethod(req.body?.method, payment.method);
