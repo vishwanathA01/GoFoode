@@ -21,8 +21,23 @@ try {
 }
 console.log("MongoDB connected");
 let shuttingDown = false;
-mongoose.connection.on("disconnected", () => { if (!shuttingDown) console.warn("MongoDB disconnected; requests will fail until it reconnects."); });
-mongoose.connection.on("reconnected", () => console.log("MongoDB reconnected"));
+// The driver reconnects by itself. Brief drops are normal (for example a laptop sleeping), so only an
+// outage that lasts more than 15 seconds is reported, and then its recovery too.
+let outageTimer = null, outageReported = false;
+mongoose.connection.on("disconnected", () => {
+  if (shuttingDown || outageTimer) return;
+  outageTimer = setTimeout(() => { outageReported = true; console.warn("MongoDB has been unreachable for 15 seconds; requests will fail until it reconnects."); }, 15000);
+  outageTimer.unref();
+});
+mongoose.connection.on("reconnected", () => {
+  clearTimeout(outageTimer);
+  outageTimer = null;
+  if (outageReported) console.log("MongoDB reconnected");
+  outageReported = false;
+});
+// Without an "error" listener, Node treats a lost database as a fatal crash. Log it and keep serving:
+// the driver reconnects on its own once MongoDB is back.
+mongoose.connection.on("error", error => { if (!shuttingDown) console.error(`MongoDB error: ${error.message}. Retrying automatically…`); });
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {

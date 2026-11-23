@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   AlertTriangle, ArrowLeft, ArrowRight, BellOff, Bike, Briefcase, Building2, CalendarClock, Check, CheckCircle2, ChevronRight, Clock, CreditCard,
-  DoorOpen, Home, Info, Landmark, Leaf, Loader2, Lock, MapPin, Minus, Package, PackageCheck, PartyPopper, Pencil, Phone, PhoneCall, Plus, Printer,
+  DoorOpen, Home, Info, Landmark, Leaf, Loader2, Lock, MapPin, Minus, PackageCheck, PartyPopper, Pencil, PhoneCall, Plus, Printer,
   Receipt, Repeat, RotateCcw, ShieldCheck, ShoppingBasket, Smartphone, Sparkles, Trash2, Truck, Wallet, XCircle, Zap
 } from "lucide-react";
 import { useAuth } from "./AuthContext";
@@ -175,7 +175,7 @@ export function MartCheckout({ items, basket, products, changeQuantity, onBackTo
   return <div className="mc-page">
     <header className="mc-top">
       <div className="mc-wrap mc-top-row">
-        <Link to="/" className="mc-logo" aria-label="GoFoode home"><img src="/gofoode-logo.png" alt="GoFoode"/></Link>
+        <Link to="/" className="mc-logo" aria-label="GoFoode home"><img src="/gofoode-logo-header.png" alt="GoFoode"/></Link>
         <Stepper step={step} onStep={setStep}/>
         <span className="mc-secure"><Lock size={15}/> Secure checkout</span>
       </div>

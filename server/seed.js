@@ -3,28 +3,36 @@ import bcrypt from "bcryptjs";
 import { config } from "./config.js";
 import { User, Restaurant, FoodItem, GroceryProduct, Coupon, Experience } from "./models.js";
 import { groceryProducts } from "./groceryProducts.js";
+import { demoAddress, demoRestaurants, fixedDishPhoto } from "./demoCatalog.js";
 
 await mongoose.connect(config.mongoUri);
-const demoRestaurants = await Restaurant.find({ name: /GoFoode Demo/ }).select("_id");
+// The six seeded kitchens, under their current names or the older "GoFoode Demo …" ones.
+const seededKitchens = demoRestaurants.filter(entry => entry.legacyName);
+const seededQuery = { $or: [{ name: /GoFoode Demo/ }, { name: { $in: seededKitchens.flatMap(entry => [entry.name, entry.legacyName]) } }] };
+const existingDemo = await Restaurant.find(seededQuery).select("_id");
 await Promise.all([
   User.deleteMany({ email: /@gofoode\.demo$/ }),
-  FoodItem.deleteMany({ restaurant: { $in: demoRestaurants.map(restaurant => restaurant._id) } }),
-  Restaurant.deleteMany({ name: /GoFoode Demo/ })
+  FoodItem.deleteMany({ restaurant: { $in: existingDemo.map(restaurant => restaurant._id) } }),
+  Restaurant.deleteMany(seededQuery)
 ]);
 const password = async p => bcrypt.hash(p, 12);
 const admin = await User.create({ name: "GoFoode Admin", email: "admin@gofoode.demo", password: await password("Admin123!"), role: "admin", isVerified: true });
 const owner = await User.create({ name: "Demo Restaurant Owner", email: "owner@gofoode.demo", password: await password("Owner123!"), role: "restaurant_owner", isVerified: true });
 await User.create({ name: "Demo Delivery Partner", email: "rider@gofoode.demo", password: await password("Rider123!"), role: "delivery_partner", isVerified: true, isAvailable: true });
-await User.create({ name: "Demo Customer", email: "customer@gofoode.demo", password: await password("Customer123!"), role: "customer", isVerified: true, profileImage: "/images/avatar-demo-customer.jpg" });
-const restaurants = await Restaurant.create([
-  { owner: owner._id, name: "GoFoode Demo Burger House", description: "Smash burgers and comfort food, cooked to order.", cuisine: ["Burgers","Fast Food"], address: { city: "Faridabad", state: "Haryana" }, status: "approved", rating: 4.8, deliveryTime: 25, coverImage: "https://images.unsplash.com/photo-1550547660-d9450f859349?w=900" },
-  { owner: owner._id, name: "GoFoode Demo Spice Kitchen", description: "Indian favourites and slow-cooked classics made fresh.", cuisine: ["Indian","North Indian"], address: { city: "Faridabad", state: "Haryana" }, status: "approved", rating: 4.6, deliveryTime: 35, coverImage: "https://images.unsplash.com/photo-1585937421612-70a008356fbe?w=900" },
-  { owner: owner._id, name: "GoFoode Demo Pizza Oven", description: "Hand-stretched pizzas with bubbling cheese and fresh toppings.", cuisine: ["Pizza","Italian"], address: { city: "Faridabad", state: "Haryana" }, status: "approved", rating: 4.7, deliveryTime: 30, coverImage: "https://images.unsplash.com/photo-1579751626657-72bc17010498?w=900" },
-  { owner: owner._id, name: "GoFoode Demo Wok & Bowl", description: "Quick wok-tossed noodles, rice bowls and Chinese favourites.", cuisine: ["Chinese","Asian"], address: { city: "Faridabad", state: "Haryana" }, status: "approved", rating: 4.5, deliveryTime: 30, coverImage: "https://images.unsplash.com/photo-1563245372-f21724e3856d?w=900" },
-  { owner: owner._id, name: "GoFoode Demo Green Bowl", description: "Colourful salads and balanced bowls made with fresh produce.", cuisine: ["Healthy","Salads"], address: { city: "Faridabad", state: "Haryana" }, status: "approved", rating: 4.6, deliveryTime: 25, coverImage: "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=900" },
-  { owner: owner._id, name: "GoFoode Demo Sweet Studio", description: "Small-batch cakes, brownies and treats for a sweet finish.", cuisine: ["Desserts","Bakery"], address: { city: "Faridabad", state: "Haryana" }, status: "approved", rating: 4.9, deliveryTime: 25, coverImage: "https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=900" }
-]);
-await FoodItem.create([
+await User.create({ name: "Demo Customer", email: "customer@gofoode.demo", password: await password("Customer123!"), role: "customer", isVerified: true });
+const kitchenDetails = [
+  { cuisine: ["Burgers","Fast Food"], rating: 4.8, deliveryTime: 25 },
+  { cuisine: ["Indian","North Indian"], rating: 4.6, deliveryTime: 35 },
+  { cuisine: ["Pizza","Italian"], rating: 4.7, deliveryTime: 30 },
+  { cuisine: ["Chinese","Asian"], rating: 4.5, deliveryTime: 30 },
+  { cuisine: ["Healthy","Salads"], rating: 4.6, deliveryTime: 25 },
+  { cuisine: ["Desserts","Bakery"], rating: 4.9, deliveryTime: 25 }
+];
+const restaurants = await Restaurant.create(seededKitchens.map((entry, index) => ({
+  owner: owner._id, name: entry.name, description: entry.description, coverImage: entry.coverImage,
+  address: demoAddress(entry), status: "approved", ...kitchenDetails[index]
+})));
+const demoDishes = [
   { restaurant: restaurants[0]._id, name: "Classic Smash Burger", description: "Juicy grilled patty, lettuce and house sauce.", price: 199, foodType: "non-veg", calories: 520, spiceLevel: "Medium", ingredients: ["Beef patty","Lettuce","Cheddar","House sauce"], allergens: ["Gluten","Milk"], portionSize: "1 burger", preparationTime: 18, isBestseller: true, image: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=700" },
   { restaurant: restaurants[0]._id, name: "Crispy Veg Burger", description: "Crispy vegetable patty with fresh toppings.", price: 149, foodType: "veg", calories: 390, spiceLevel: "Mild", ingredients: ["Vegetable patty","Lettuce","Tomato","Whole wheat bun"], allergens: ["Gluten"], portionSize: "1 burger", preparationTime: 15, image: "https://images.unsplash.com/photo-1550317138-10000687a72b?w=700" },
   { restaurant: restaurants[1]._id, name: "Paneer Butter Masala", description: "Creamy tomato gravy with paneer.", price: 249, foodType: "veg", calories: 460, spiceLevel: "Medium", ingredients: ["Paneer","Tomato","Cream","Indian spices"], allergens: ["Milk"], portionSize: "Serves 1", preparationTime: 22, isBestseller: true, image: "https://images.unsplash.com/photo-1631452180519-c014fe946bc7?w=700" },
@@ -48,7 +56,8 @@ await FoodItem.create([
   { restaurant: restaurants[4]._id, name: "Grilled Chicken Caesar Salad", description: "Grilled chicken and crisp romaine with parmesan dressing.", price: 289, foodType: "non-veg", calories: 390, spiceLevel: "Mild", ingredients: ["Chicken","Romaine","Parmesan","Croutons"], allergens: ["Milk","Gluten","Eggs"], portionSize: "Serves 1", preparationTime: 15, image: "https://images.unsplash.com/photo-1550304943-4f24f54ddde9?w=700" },
   { restaurant: restaurants[5]._id, name: "Classic Tiramisu", description: "Coffee-soaked sponge layered with mascarpone cream and cocoa.", price: 159, foodType: "veg", calories: 390, spiceLevel: "", ingredients: ["Mascarpone","Coffee","Cocoa","Sponge cake"], allergens: ["Milk","Gluten","Eggs"], portionSize: "1 cup", preparationTime: 5, image: "https://images.unsplash.com/photo-1571877227200-a0d98ea607e9?w=700" },
   { restaurant: restaurants[5]._id, name: "Blueberry Cheesecake", description: "Creamy baked cheesecake finished with a blueberry compote.", price: 189, foodType: "veg", calories: 450, spiceLevel: "", ingredients: ["Cream cheese","Blueberries","Biscuit base","Butter"], allergens: ["Milk","Gluten","Eggs"], portionSize: "1 slice", preparationTime: 5, image: "https://images.unsplash.com/photo-1533134242443-d4fd215305ad?w=700" }
-]);
+];
+await FoodItem.create(demoDishes.map(dish => ({ ...dish, image: fixedDishPhoto(dish.name, dish.image) })));
 await GroceryProduct.deleteMany({});
 await GroceryProduct.create(groceryProducts);
 await Coupon.deleteMany({code:{$in:["WELCOME50","TASTY20","GOFOODE100"]}});

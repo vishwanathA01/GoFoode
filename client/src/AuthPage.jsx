@@ -47,7 +47,9 @@ export default function AuthPage({ mode }) {
   const navigate = useNavigate();
   const routerLocation = useLocation();
   const isLogin = mode === "login";
-  const returnTo = typeof routerLocation.state?.from === "string" && routerLocation.state.from.startsWith("/") ? routerLocation.state.from : null;
+  // Only same-site paths: "/\host" and "//host" would leave the site (an open redirect).
+  const from = routerLocation.state?.from;
+  const returnTo = typeof from === "string" && /^\/(?![\\/])/.test(from) ? from : null;
   // /register?ref=CODE comes from a friend's invite link; invited customers land on Rewards to see their gift.
   const refParam = (new URLSearchParams(routerLocation.search).get("ref") || "").trim().toUpperCase();
   const inviteCode = isLogin ? "" : refParam;
@@ -87,14 +89,14 @@ export default function AuthPage({ mode }) {
   return <div className={`au-shell ${isLogin ? "login" : "register"}`}>
     <aside className="au-visual" aria-hidden="true">
       <div className="au-glow a"/><div className="au-glow b"/>
-      <Link to="/" className="au-logo" tabIndex={-1}><img src="/gofoode-logo.png" alt=""/></Link>
+      <Link to="/" className="au-logo" tabIndex={-1}><img src="/gofoode-logo-header.png" alt=""/></Link>
       <div className="au-visual-copy">
         <span className="au-kicker"><Sparkles size={14}/>{isLogin ? "Welcome back" : "Join GoFoode free"}</span>
         <h1>{isLogin ? <>Hungry? Your favourites are <em>waiting.</em></> : <>Good food is <em>one tap away.</em></>}</h1>
         <p>{isLogin ? "Log in to reorder in a tap, follow your rider live and spin today's reward wheel." : "Create your account to order from the best local kitchens and unlock daily rewards."}</p>
       </div>
       <div className="au-art">
-        <img src={isLogin ? photos.doorstep : photos.scooter} alt=""/>
+        <img src={isLogin ? photos.signin : photos.scooter} alt=""/>
         <span className="au-float one"><span className="au-float-icon green"><Navigation size={15}/></span><span><b>Order on the way</b><small>Live tracking</small></span></span>
         <span className="au-float two"><span className="au-float-icon"><Gift size={15}/></span><span><b>Daily spin</b><small>Up to ₹100 off</small></span></span>
       </div>
@@ -104,7 +106,7 @@ export default function AuthPage({ mode }) {
     <main className="au-main">
       <div className="au-topbar">
         <Link to="/" className="au-back"><ArrowLeft size={16}/> Back to home</Link>
-        <Link to="/" className="au-mobile-logo"><img src="/gofoode-logo.png" alt="GoFoode home"/></Link>
+        <Link to="/" className="au-mobile-logo"><img src="/gofoode-logo-header.png" alt="GoFoode home"/></Link>
       </div>
       <div className="au-card">
         <div className="au-tabs" role="tablist" aria-label="Account">

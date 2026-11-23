@@ -1,7 +1,7 @@
 import React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Routes, Route, Link, Navigate, useNavigate, useLocation, useParams } from "react-router-dom";
-import { Search, ShoppingBag, MapPin, Star, Clock, ArrowRight, Utensils, Menu, X, LogOut, LayoutDashboard, Store, Bike, Users, ClipboardList, Bell, Plus, Minus, CheckCircle2, TrendingUp, Package, Wallet, ChefHat, Settings, ShieldCheck, Heart, ShoppingBasket, TicketPercent, CalendarDays, Crown, Trash2, PackageOpen, RefreshCw, UserRound, Mail, Phone, MessageCircle, Send, Power, History, Activity, CreditCard, LayoutGrid, List, Truck, Sparkles, Leaf, Navigation, Quote, Flame, BadgePercent, Mic, SlidersHorizontal, ChevronLeft, ChevronRight, Check, PackageCheck, Eye, Zap, RotateCcw, Lock, Hourglass, Undo2, House, Gift, PartyPopper, ChevronDown, UtensilsCrossed , Camera, Crosshair } from "lucide-react";
+import { Search, ShoppingBag, MapPin, Star, Clock, ArrowRight, Utensils, Menu, X, LogOut, LayoutDashboard, Store, Bike, Users, ClipboardList, Bell, Plus, Minus, CheckCircle2, TrendingUp, Package, Wallet, ChefHat, ShieldCheck, Heart, ShoppingBasket, TicketPercent, CalendarDays, Crown, Trash2, PackageOpen, RefreshCw, UserRound, Mail, Phone, MessageCircle, Send, Power, History, Activity, CreditCard, LayoutGrid, List, Truck, Sparkles, Leaf, Navigation, Flame, BadgePercent, Mic, SlidersHorizontal, ChevronLeft, ChevronRight, Check, PackageCheck, Eye, Zap, RotateCcw, Lock, Hourglass, Undo2, House, Gift, PartyPopper, ChevronDown, UtensilsCrossed , Camera, Crosshair, PackageSearch, SearchX, Soup } from "lucide-react";
 import { useAuth } from "./AuthContext";
 import api from "./api";
 import { InstallPrompt, MoodFinder, PulseSection, RewardsPage, RewardsTeaser } from "./engagement";
@@ -9,6 +9,8 @@ import AuthPage from "./AuthPage";
 import { DineoutView, ExperiencesView, GenieView, OffersView, PlusView } from "./tabs";
 import { cuisinePhoto, initials, avatarTone, photos, restaurantCover } from "./media";
 import { LocationSheet } from "./location";
+import { LiveTracker, RiderRoute, TrackingPreview } from "./tracking";
+import { distanceM } from "./geo";
 import { MartCheckout, MartOrderView } from "./martCheckout";
 import { ONLINE_METHODS, exactMoney, PaymentActionCard, PaymentDetailsCard, PaymentHealth, completeOnlinePayment, describePaymentOutcome, errorMessage, isRetryableError, newIdempotencyKey, onlineMethodOptions, paymentMethodLabel, paymentStatusLabel, usePaymentGateway, withRetry } from "./payments";
 
@@ -64,14 +66,9 @@ function Protected({ roles, children }) {
   if (roles && !roles.includes(user.role)) return <Navigate to="/dashboard" replace />;
   return children;
 }
-function RoleRedirect() {
-  const { user } = useAuth();
-  if (!user) return <Navigate to="/login" replace />;
-  return <Navigate to={`/${user.role === "restaurant_owner" ? "restaurant" : user.role === "delivery_partner" ? "delivery" : user.role === "admin" ? "admin" : "customer"}`} replace />;
-}
 function Brand({ light = false }) {
   return <Link to="/" className={`brand gofoode-brand ${light ? "brand-light" : ""}`} aria-label="GoFoode home">
-    <img src="/gofoode-logo.png" alt="GoFoode" />
+    <img src="/gofoode-logo-header.png" alt="GoFoode" />
   </Link>;
 }
 // ---------------------------------------------------------------------------------------------------------
@@ -154,39 +151,92 @@ function HeaderTabs({ role }) {
   }, [pathname]);
   return <nav className={`gf-tabs ${workspace ? "workspace" : ""}`} aria-label={workspace ? `${roleLabels[role]} workspace` : "Main"}>
     <div className="gf-wrap gf-tabs-inner" ref={barRef}>
-      {tabs.map(tab => { const Icon = tab.icon; const on = isActive(tab); return <Link key={tab.to} to={tab.to} className={`gf-tab ${on ? "on" : ""} ${tab.accent ? "accent" : ""}`} aria-current={on ? "page" : undefined}><Icon size={16}/><span>{tab.label}</span></Link>; })}
+      {tabs.map(tab => { const on = isActive(tab); return <Link key={tab.to} to={tab.to} className={`gf-tab ${on ? "on" : ""}`} aria-current={on ? "page" : undefined}><span>{tab.label}</span>{tab.accent && <span className="gf-tab-new">New</span>}</Link>; })}
       {workspace && <span className="gf-workspace-chip">{roleLabels[role]} workspace</span>}
     </div>
   </nav>;
 }
+// Pages with their own large search box don't repeat it in the header.
+const HEADER_SEARCH_HIDDEN = ["/", "/food", "/instamart", "/login", "/register"];
+function HeaderSearch() {
+  const navigate = useNavigate();
+  const [term, setTerm] = useState("");
+  return <form className="gf-search" role="search" onSubmit={event => { event.preventDefault(); const query = term.trim(); navigate(query ? `/food?q=${encodeURIComponent(query)}` : "/food"); }}>
+    <Search size={18}/>
+    <input value={term} onChange={event => setTerm(event.target.value)} placeholder="Search for restaurants and dishes" aria-label="Search for restaurants and dishes"/>
+  </form>;
+}
+// Number of items in the customer's cart, refreshed whenever the cart changes anywhere in the app.
+function useCartCount(enabled) {
+  const [count, setCount] = useState(0);
+  const { pathname } = useLocation();
+  useEffect(() => {
+    if (!enabled) { setCount(0); return undefined; }
+    let alive = true, timer = 0;
+    const load = () => api.get("/cart").then(response => { if (alive) setCount((response.data?.items || []).reduce((sum, item) => sum + (item.quantity || 0), 0)); }).catch(() => {});
+    const refresh = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
+    load();
+    window.addEventListener("gofoode:cart-changed", refresh);
+    return () => { alive = false; clearTimeout(timer); window.removeEventListener("gofoode:cart-changed", refresh); };
+  }, [enabled, pathname]);
+  return count;
+}
 function Header() {
   const { user, logout, location, locationStatus, locationError } = useAuth();
+  const { pathname } = useLocation();
   const [locationOpen, setLocationOpen] = useState(false);
   const locating = locationStatus === "loading" || locationStatus === "retrying";
-  return <><div className="announcement"><span>✦</span> Fresh cravings, happy moments — delivered to your door <Link className="announcement-link" to="/offers">Explore today’s offers</Link></div>
+  const isCustomer = user?.role === "customer";
+  const showSearch = (!user || isCustomer) && !HEADER_SEARCH_HIDDEN.includes(pathname);
+  const cartCount = useCartCount(isCustomer);
+  return <><div className="announcement"><span><span className="announcement-lead">New to GoFoode? </span>Get 50% off your first order with code <b>WELCOME50</b></span><Link className="announcement-link" to="/offers">View offers <ArrowRight size={13}/></Link></div>
   <header className="gf-header">
     <div className="gf-wrap gf-header-row">
     <Brand />
+    <span className="gf-divider" aria-hidden="true"/>
     <div className="location-control">
-      <button className={`location-pill ${locationError && !location ? "has-error" : ""}`} type="button" aria-haspopup="dialog" aria-expanded={locationOpen} onClick={() => setLocationOpen(true)} aria-label={`Delivery location: ${location?.label || "not set"}. Change location`}>
-        <MapPin size={16}/><span className="location-pill-prefix">Delivering to</span><b>{locating ? "Locating…" : location?.label || "Choose location"}</b><ChevronDown size={14}/>
+      <button className={`gf-loc ${location ? "" : "unset"} ${locationError && !location ? "has-error" : ""}`} type="button" aria-haspopup="dialog" aria-expanded={locationOpen} onClick={() => setLocationOpen(true)} aria-label={`Delivery location: ${location?.label || "not set"}. Change location`}>
+        <MapPin size={20}/>
+        <span className="gf-loc-text"><small>Deliver to</small><b>{locating ? "Locating…" : location?.label || "Select your location"}</b></span>
+        <ChevronDown size={16}/>
       </button>
       <LocationSheet open={locationOpen} onClose={() => setLocationOpen(false)}/>
     </div>
+    {showSearch && <HeaderSearch/>}
     <div className="gf-actions">
       {user ? <>
-        {user.role === "customer" && <><Link className="gf-icon-link" to="/customer/orders" aria-label="My orders"><ClipboardList size={19}/><span>Orders</span></Link><Link className="gf-icon-link" to="/cart" aria-label="Cart"><ShoppingBag size={19}/><span>Cart</span></Link></>}
+        {isCustomer && <>
+          <Link className="gf-icon-link" to="/customer/orders" aria-label="My orders"><ClipboardList size={20}/><span>Orders</span></Link>
+          <Link className="gf-icon-link" to="/cart" aria-label={`Cart${cartCount ? `, ${cartCount} item${cartCount === 1 ? "" : "s"}` : ""}`}><span className="gf-cart-icon"><ShoppingBag size={20}/>{cartCount > 0 && <em>{cartCount > 99 ? "99+" : cartCount}</em>}</span><span>Cart</span></Link>
+        </>}
         <AccountMenu user={user} logout={logout}/>
-      </> : <><Link className="gf-login" to="/login">Log in</Link><Link className="btn btn-primary btn-small gf-cta" to="/register">Get started <ArrowRight size={14}/></Link></>}
+      </> : <><Link className="gf-login" to="/login"><UserRound size={18}/><span>Log in</span></Link><Link className="gf-signup" to="/register">Sign up</Link></>}
     </div>
     </div>
   </header>
   <HeaderTabs role={user?.role}/></>;
 }
+// Road distance is roughly 1.35× the straight line in Indian cities; riders average about 22 km/h.
+const SERVICE_RADIUS_M = 30000;
+function kitchenDistanceM(restaurant, location) {
+  const coords = restaurant?.address?.location?.coordinates;
+  if (!location || !Number.isFinite(Number(location.latitude)) || !Number.isFinite(Number(location.longitude)) || !Array.isArray(coords) || (!coords[0] && !coords[1])) return null;
+  return distanceM([Number(location.latitude), Number(location.longitude)], [coords[1], coords[0]]);
+}
+function deliveryWindow(restaurant, meters) {
+  if (meters == null || meters > SERVICE_RADIUS_M) { const base = restaurant?.deliveryTime || 35; return { from: base, to: base + 5 }; }
+  const minutes = Math.round(Math.min(75, 14 + meters * 1.35 / 6.2 / 60));
+  return { from: minutes, to: minutes + 5 };
+}
+const distanceLabel = meters => meters < 1000 ? `${Math.max(100, Math.round(meters / 100) * 100)} m` : `${(meters / 1000).toFixed(1)} km`;
 function RestaurantCard({ restaurant }) {
+  const { location } = useAuth();
+  const meters = kitchenDistanceM(restaurant, location);
+  const nearby = meters != null && meters <= SERVICE_RADIUS_M;
+  const eta = deliveryWindow(restaurant, meters);
   return <Link to={`/restaurants/${restaurant._id}`} className="restaurant-card">
-    <div className="restaurant-photo"><img src={restaurantCover(restaurant)} alt={restaurant.name} loading="lazy" onError={showImageFallback}/><span className="photo-tag">POPULAR</span></div>
-    <div className="restaurant-card-body"><div className="card-title-row"><h3>{restaurant.name}</h3><span className="rating"><Star size={14} fill="currentColor"/> {restaurant.rating || "New"}</span></div><p>{(restaurant.cuisine || []).join(" · ") || "Multi-cuisine"}</p>{restaurant.description&&<small className="restaurant-description">{restaurant.description}</small>}<div className="card-meta"><span><Clock size={14}/> {restaurant.deliveryTime || 35} min delivery</span><span><MapPin size={13}/> {restaurant.address?.city||"Nearby"}</span></div></div>
+    <div className="restaurant-photo"><img src={restaurantCover(restaurant)} alt={restaurant.name} loading="lazy" onError={showImageFallback}/>{restaurant.rating >= 4.7 && <span className="photo-tag">Top rated</span>}</div>
+    <div className="restaurant-card-body"><div className="card-title-row"><h3>{restaurant.name}</h3><span className="rating"><Star size={14} fill="currentColor"/> {restaurant.rating ? Number(restaurant.rating).toFixed(1) : "New"}</span></div><p>{(restaurant.cuisine || []).join(" · ") || "Multi-cuisine"}</p>{restaurant.description&&<small className="restaurant-description">{restaurant.description}</small>}<div className="card-meta"><span><Clock size={14}/> {eta.from}–{eta.to} min</span><span><MapPin size={13}/> {nearby ? `${distanceLabel(meters)} away` : [restaurant.address?.street?.split(",").pop()?.trim(), restaurant.address?.city].filter(Boolean).join(", ") || "Nearby"}</span></div></div>
   </Link>;
 }
 function ChatWidget() {
@@ -234,30 +284,20 @@ function ChatWidget() {
     <button className="chat-launcher" onClick={()=>setOpen(value=>!value)} aria-label={open?"Close chat":"Chat with GoFoode"}><MessageCircle size={22}/><span>{open?"Close":"Chat with us"}</span></button>
   </div>;
 }
-const communityStories=[
-  {name:"Aisha Mehta",role:"GoFoode customer",quote:"Finding a new favourite is easy, and the delivery updates mean I always know what’s happening with my order."},
-  {name:"Rohan Shah",role:"GoFoode customer",quote:"I can explore local menus, compare details, and get dinner sorted in just a few taps."},
-  {name:"Neha Kapoor",role:"Restaurant owner · Cafe Basil",quote:"The menu and order tools help our team stay organized during the dinner rush and reach more people nearby."},
-  {name:"Arjun Rao",role:"Restaurant owner · Spice Route",quote:"GoFoode gives our restaurant a simple way to share our food with the neighbourhood and manage incoming orders."}
-];
 const unsplash = (id, width = 480) => `https://images.unsplash.com/photo-${id}?w=${width}&q=75&auto=format&fit=crop`;
-const prefersReducedMotion = () => typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
-const heroCravings = ["biryani", "pizza", "momos", "burgers", "desserts"];
-const heroOrbit = ["1565299624946-b28f40a0ae38", "1496116218417-1a781b1c416c", "1563379091339-03b21ab4a4f8", "1563805042-7684c019e1cb"];
-const cuisineRibbon = [
-  { name: "Biryani", term: "biryani", image: "1563379091339-03b21ab4a4f8" },
-  { name: "Pizza", term: "pizza", image: "1565299624946-b28f40a0ae38" },
-  { name: "Momos", term: "momo", image: "1496116218417-1a781b1c416c" },
-  { name: "Burgers", term: "burger", image: "1568901346375-23c9450c58cd" },
-  { name: "North Indian", term: "indian", image: "1585937421612-70a008356fbe" },
-  { name: "Healthy bowls", term: "healthy", image: "1546069901-ba9599a7e63c" },
-  { name: "Street food", term: "samosa", image: "1601050690597-df0568f70950" },
-  { name: "Desserts", term: "dessert", image: "1563805042-7684c019e1cb" },
-  { name: "Pasta", term: "pasta", image: "1473093295043-cdd812d0e601" },
-  { name: "Pav bhaji", term: "pav bhaji", image: "1606491956689-2ea866880c84" },
-  { name: "Fried chicken", term: "chicken", image: "1626082927389-6cd097cdc6ec" },
-  { name: "Mocktails", term: "drink", image: "1513558161293-cdaf765ed2fd" }
+// Asks Unsplash for a smaller copy of a dish photo; any other image is used as it is.
+const resizedPhoto = (url, width) => /^https:\/\/images\.unsplash\.com\//.test(url || "") ? url.replace(/([?&])w=\d+/, `$1w=${width}`) : url;
+// Each craving searches for words that real dishes on the menu contain.
+const heroCravings = [
+  { label: "Biryani", term: "Biryani", image: "1589302168068-964664d93dc0" },
+  { label: "Pizza", term: "Pizza", image: "1565299624946-b28f40a0ae38" },
+  { label: "Burgers", term: "Burger", image: "1568901346375-23c9450c58cd" },
+  { label: "Noodles", term: "Noodles", image: "1612929633738-8fe44f7ec841" },
+  { label: "Desserts", term: "Dessert", image: "1606313564200-e75d5e30476c" }
 ];
+// The rider's path on the hero's mini map. The CSS animates the rider dot along the same path.
+const heroRoute = "M18 52C48 52 54 24 88 24S134 50 168 50S208 22 230 22";
+const prefersReducedMotion = () => typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 const homeCategories = [
   { name: "Indian", note: "Rich & comforting", image: "1585937421612-70a008356fbe" },
   { name: "Pizza", note: "Cheesy favourites", image: "1565299624946-b28f40a0ae38" },
@@ -268,25 +308,18 @@ const homeCategories = [
   { name: "Desserts", note: "A sweet finish", image: "1551024601-bec78aea704b" }
 ];
 const homeServices = [
-  { to: "/food", cls: "food", icon: "🍽️", title: "Food delivery", text: "Restaurant favourites, cooked fresh by local kitchens and brought straight to your door.", cta: "Order food", image: "1600891964599-f61ba0e24092" },
-  { to: "/instamart", cls: "mart", icon: "🛒", title: "GoFoode Mart", text: "Groceries and daily essentials, sorted.", cta: "Shop essentials", image: "1542838132-92c53300491e" },
-  { to: "/dineout", cls: "dine", icon: "🥂", title: "Dineout", text: "Discover places and book a table.", cta: "Find a table", image: "1517248135467-4c7edcad34c4" },
-  { to: "/genie", cls: "genie", icon: "📦", title: "Pickup & drop", text: "Send parcels across your city.", cta: "Request pickup", image: "1586528116311-ad8dd3c8310d" },
-  { to: "/experiences", cls: "events", icon: "🎟️", title: "Experiences", text: "Food events and local experiences worth booking.", cta: "Explore events", image: "1511795409834-ef04bbd61622" },
-  { to: "/offers", cls: "offers", icon: "🎁", title: "Offers & rewards", text: "Coupon codes and savings for your next order.", cta: "Browse offers", image: "1555939594-58d7cb561ad1" }
+  { to: "/food", cls: "food", icon: Utensils, title: "Food delivery", text: "Restaurant favourites, cooked fresh by local kitchens and brought straight to your door.", cta: "Order food", image: "1600891964599-f61ba0e24092" },
+  { to: "/instamart", cls: "mart", icon: ShoppingBasket, title: "GoFoode Mart", text: "Groceries and daily essentials, sorted.", cta: "Shop essentials", image: "1542838132-92c53300491e" },
+  { to: "/dineout", cls: "dine", icon: UtensilsCrossed, title: "Dineout", text: "Discover places and book a table.", cta: "Find a table", image: "1517248135467-4c7edcad34c4" },
+  { to: "/genie", cls: "genie", icon: Package, title: "Pickup & drop", text: "Send parcels across your city.", cta: "Request pickup", image: "1586528116311-ad8dd3c8310d" },
+  { to: "/experiences", cls: "events", icon: PartyPopper, title: "Experiences", text: "Food events and local experiences worth booking.", cta: "Explore events", image: "1511795409834-ef04bbd61622" },
+  { to: "/offers", cls: "offers", icon: TicketPercent, title: "Offers & rewards", text: "Coupon codes and savings for your next order.", cta: "Browse offers", image: "1555939594-58d7cb561ad1" }
 ];
 const homeSteps = [
   { icon: Search, title: "Discover your craving", text: "Browse trusted local restaurants with real menus, ingredients and dietary details.", note: "Made to order by local kitchens" },
   { icon: ShoppingBag, title: "Order in a few taps", text: "Pick your favourites, customise your basket and check out in moments.", note: "See prep time before you order" },
   { icon: Navigation, title: "Follow the flavour", text: "Get updates as your food is prepared and brought right to your door.", note: "Follow your rider on the map" }
 ];
-const trackingStages = [
-  { icon: ClipboardList, title: "Order placed", text: "The restaurant confirms your order." },
-  { icon: ChefHat, title: "Being prepared", text: "Your meal is cooked fresh." },
-  { icon: Bike, title: "On the way", text: "Follow your delivery partner live." },
-  { icon: CheckCircle2, title: "Delivered", text: "Hot, fresh and ready to enjoy." }
-];
-
 function useRevealOnScroll(rootRef) {
   const observerRef = useRef(null);
   useEffect(() => {
@@ -331,32 +364,6 @@ function CountUp({ value, suffix = "" }) {
   }, [value]);
   return <span ref={ref}>{shown}{suffix}</span>;
 }
-function RotatingWord({ words }) {
-  const [index, setIndex] = useState(0);
-  useEffect(() => {
-    if (prefersReducedMotion()) return;
-    const timer = setInterval(() => setIndex(current => (current + 1) % words.length), 2400);
-    return () => clearInterval(timer);
-  }, [words.length]);
-  return <span className="hx-rotator" aria-hidden="true">
-    <span className="hx-rotator-clip"><span className="hx-rotator-word" key={index}>{words[index]}</span></span>
-    <svg className="hx-squiggle" key={`line-${index}`} viewBox="0 0 300 20" preserveAspectRatio="none"><path d="M4 14 C 60 2, 110 4, 152 11 S 250 19, 296 6"/></svg>
-  </span>;
-}
-function TrackingTimeline() {
-  const [active, setActive] = useState(() => prefersReducedMotion() ? trackingStages.length - 1 : 0);
-  useEffect(() => {
-    if (prefersReducedMotion()) return;
-    const timer = setInterval(() => setActive(current => (current + 1) % trackingStages.length), 2200);
-    return () => clearInterval(timer);
-  }, []);
-  return <ol className="hx-timeline" style={{ "--progress": active / (trackingStages.length - 1) }}>
-    {trackingStages.map((stage, index) => <li key={stage.title} className={index < active ? "done" : index === active ? "active" : ""}>
-      <span className="hx-timeline-icon"><stage.icon size={18}/></span>
-      <span><b>{stage.title}</b><small>{stage.text}</small></span>
-    </li>)}
-  </ol>;
-}
 function Home() {
   const { user, location } = useAuth();
   const [restaurants, setRestaurants] = useState([]);
@@ -371,15 +378,13 @@ function Home() {
   const [dishError, setDishError] = useState("");
   const [reviewError, setReviewError] = useState("");
   const homeRef = useRef(null);
-  const visualRef = useRef(null);
-  const pointerFrame = useRef(0);
+  const [locationOpen, setLocationOpen] = useState(false);
   useRevealOnScroll(homeRef);
   useEffect(() => {
     api.get("/restaurants").then(r => setRestaurants(r.data)).catch(() => setRestaurantError("Restaurants could not be loaded. Please try again later.")).finally(() => setLoading(false));
     api.get("/food-items").then(r => setDishes(r.data)).catch(() => setDishError("Popular dishes could not be loaded. Please try again later.")).finally(() => setDishLoading(false));
     api.get("/reviews/featured").then(r => setReviews(r.data)).catch(() => setReviewError("Customer feedback could not be loaded right now."));
   }, []);
-  useEffect(() => () => cancelAnimationFrame(pointerFrame.current), []);
   const categories = ["All", "Indian", "Pizza", "Burgers", "Chinese", "Cold Drinks", "Healthy", "Desserts"];
   const filtered = restaurants.filter(r => {
     const text = `${r.name} ${(r.cuisine || []).join(" ")}`.toLowerCase();
@@ -393,94 +398,82 @@ function Home() {
   const featuredDishLimit = 12;
   const featuredDishes = showAllDishes ? filteredDishes : filteredDishes.slice(0, featuredDishLimit);
   const isFiltering = Boolean(search.trim()) || category !== "All";
-  const cuisineCount = new Set(restaurants.flatMap(r => r.cuisine || []).map(c => String(c).trim().toLowerCase()).filter(Boolean)).size;
   const deliveryTimes = restaurants.map(r => Number(r.deliveryTime)).filter(time => time > 0);
   const averageDelivery = deliveryTimes.length ? Math.round(deliveryTimes.reduce((sum, time) => sum + time, 0) / deliveryTimes.length) : 0;
-  const stats = [
-    { icon: Store, value: restaurants.length, label: "Local kitchens on GoFoode" },
-    { icon: Utensils, value: dishes.length, label: "Dishes to explore" },
-    { icon: Sparkles, value: cuisineCount, label: "Cuisines to choose from" },
-    { icon: Clock, value: averageDelivery, suffix: " min", label: "Average delivery estimate" }
-  ].filter(stat => stat.value > 0);
-  const perks = [
-    { icon: Store, title: "Plenty of choice", text: "Explore local favourites" },
-    { icon: ShoppingBag, title: "Simple ordering", text: "Your meal in a few taps" },
-    { icon: Heart, title: "Every bite matters", text: "Made fresh, delivered with care" }
-  ];
+  const heroFacts = [
+    { icon: Store, value: restaurants.length, label: "Local kitchens" },
+    { icon: Utensils, value: dishes.length, label: "Dishes to try" },
+    { icon: Clock, value: averageDelivery, suffix: " min", label: "Avg. delivery" }
+  ].filter(fact => fact.value > 0);
+  const openKitchens = restaurants.filter(entry => entry.isOpen !== false).length;
+  // The hero's dish card shows a real bestseller from the best-rated kitchen.
+  const spotlight = dishes.filter(dish => dish.isBestseller && dish.image && dish.restaurant).sort((a, b) => (b.restaurant.rating || 0) - (a.restaurant.rating || 0))[0];
   const scrollToDishes = () => document.getElementById("popular-dishes")?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth" });
   const quickSearch = term => { setSearch(term); setCategory("All"); scrollToDishes(); };
-  const moveHero = event => {
-    if (event.pointerType !== "mouse" || !visualRef.current) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width - 0.5) * 2;
-    const y = ((event.clientY - rect.top) / rect.height - 0.5) * 2;
-    cancelAnimationFrame(pointerFrame.current);
-    pointerFrame.current = requestAnimationFrame(() => {
-      visualRef.current?.style.setProperty("--px", x.toFixed(3));
-      visualRef.current?.style.setProperty("--py", y.toFixed(3));
-    });
-  };
-  const resetHero = () => {
-    cancelAnimationFrame(pointerFrame.current);
-    visualRef.current?.style.setProperty("--px", "0");
-    visualRef.current?.style.setProperty("--py", "0");
-  };
   return <><Header/><main className="gofoode-home" ref={homeRef}>
     <div className="hx-scrollbar" aria-hidden="true"/>
 
-    <section className="hx-hero" onPointerMove={moveHero} onPointerLeave={resetHero}>
-      <div className="hx-hero-bg" aria-hidden="true"><span className="hx-blob b1"/><span className="hx-blob b2"/><span className="hx-blob b3"/><span className="hx-dots"/></div>
-      <div className="hx-wrap hx-hero-inner">
-        <div className="hx-hero-copy">
-          <span className="hx-pill"><span className="hx-pulse"/>{location?.city ? <>Delivering to <b>{location.city}</b></> : "Fresh food from local kitchens"}</span>
-          <h1>Your favourite<br/><RotatingWord words={heroCravings}/><span className="hx-sr-only">food</span><br/><span className="hx-h1-tail">at your door.</span></h1>
-          <p className="hx-lead">Discover your city’s best local kitchens, order in a few taps and follow every step until a fresh, hot meal arrives at your doorstep.</p>
-          <form className="hx-search" role="search" onSubmit={event => { event.preventDefault(); scrollToDishes(); }}>
-            <Search size={20}/>
-            <input aria-label="Search dishes, restaurants or cuisines" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search biryani, pizza, cafés…"/>
-            {search && <button type="button" className="hx-search-clear" aria-label="Clear search" onClick={() => setSearch("")}><X size={16}/></button>}
-            <button type="submit" className="btn btn-primary"><span>Find food</span> <ArrowRight size={16}/></button>
+    <section className="hp-hero" aria-labelledby="hp-hero-title">
+      <div className="hx-wrap hp-hero-grid">
+        <div className="hp-hero-copy">
+          {openKitchens > 0
+            ? <p className="hp-hero-kicker"><span className="hp-kicker-live"><i/>Live</span>{openKitchens} kitchen{openKitchens === 1 ? "" : "s"} {location?.city ? `open now in ${location.city}` : "taking orders now"}</p>
+            : <p className="hp-hero-kicker"><MapPin size={14}/>Food delivery · Groceries · Dineout</p>}
+          <h1 id="hp-hero-title">Food you love, from kitchens <span className="hp-hl">near you.<svg viewBox="0 0 300 14" preserveAspectRatio="none" aria-hidden="true"><path d="M4 10 C70 3 170 2 296 7" pathLength="1"/></svg></span></h1>
+          <p className="hp-hero-lead">Order from trusted local restaurants, follow your rider live on the map, and eat while it’s still hot.</p>
+          <form className="hp-search" role="search" onSubmit={event => { event.preventDefault(); scrollToDishes(); }}>
+            <button type="button" className="hp-search-loc" onClick={() => setLocationOpen(true)} aria-haspopup="dialog" aria-label={`Delivery location: ${location?.label || "not set"}. Change location`}>
+              <MapPin size={18}/><span><small>Deliver to</small><b>{location?.label || "Set your location"}</b></span><ChevronDown size={16}/>
+            </button>
+            <label className="hp-search-field"><Search size={18}/><input aria-label="Search dishes, restaurants or cuisines" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search dishes or restaurants"/>{search && <button type="button" className="hx-search-clear" aria-label="Clear search" onClick={() => setSearch("")}><X size={15}/></button>}</label>
+            <button type="submit" className="btn btn-primary" aria-label="Search"><span>Search</span><ArrowRight size={16}/></button>
           </form>
-          <div className="hx-quick"><span>Popular:</span>{["Biryani", "Pizza", "Burger", "Momos", "Paneer"].map(term => <button type="button" key={term} onClick={() => quickSearch(term)}>{term}</button>)}</div>
-          <div className="hx-proof">
-            <div className="hx-avatars">{(restaurants.length ? restaurants.slice(0, 4) : [["Indian"], ["Pizza"], ["Burgers"], ["Chinese"]].map(cuisine => ({ cuisine }))).map((kitchen, index) => <img key={kitchen._id || index} src={restaurantCover(kitchen, 120)} alt="" onError={showImageFallback}/>)}</div>
-            <div className="hx-proof-text"><b>Local kitchens, one happy place</b><span>{restaurants.length ? `${restaurants.length} neighbourhood kitchens cooking on GoFoode` : "Food lovers and restaurant partners on GoFoode"}</span></div>
-          </div>
-          <div className="hx-perks"><span><CheckCircle2 size={16}/> Easy ordering</span><span><CheckCircle2 size={16}/> Freshly prepared</span><span><CheckCircle2 size={16}/> Live order tracking</span></div>
+          <div className="hp-quick"><span>Popular</span>{heroCravings.map(item => <button type="button" key={item.label} onClick={() => quickSearch(item.term)}><img src={unsplash(item.image, 72)} alt="" loading="lazy" onError={showImageFallback}/>{item.label}</button>)}</div>
+          {!loading && heroFacts.length >= 2 && <ul className="hp-facts">{heroFacts.map(fact => <li key={fact.label}><span className="hp-fact-icon" aria-hidden="true"><fact.icon size={17}/></span><span><b>{fact.value}{fact.suffix || ""}</b><small>{fact.label}</small></span></li>)}</ul>}
         </div>
-        <div className="hx-visual" ref={visualRef} aria-hidden="true">
-          <span className="hx-glow"/>
-          <span className="hx-ring"/>
-          <span className="hx-ring hx-ring-outer"/>
-          <span className="hx-plate"><img src={unsplash("1546069901-ba9599a7e63c", 720)} alt="" onError={showImageFallback}/></span>
-          <span className="hx-orbit">{heroOrbit.map((id, index) => <span className={`hx-orbit-item o${index + 1}`} key={id}><img src={unsplash(id, 220)} alt="" onError={showImageFallback}/></span>)}</span>
-          <span className="hx-float hx-card-cook"><span className="hx-float-icon"><ChefHat size={20}/></span><span className="hx-float-text"><b>Chef is cooking</b><span className="hx-cook-bar"><i/></span></span></span>
-          <span className="hx-float hx-card-rider"><span className="hx-float-icon blue"><span className="hx-scooter">🛵</span></span><span className="hx-float-text"><b>Rider on the way</b><small><span className="hx-live"/> Live on the map</small></span></span>
-          <span className="hx-float hx-card-fresh"><Leaf size={16}/> Made fresh</span>
-          <span className="hx-emoji e1">🌶️</span><span className="hx-emoji e2">🍅</span><span className="hx-emoji e3">🌿</span><span className="hx-emoji e4">🧀</span>
+        <div className="hp-stage" aria-hidden="true">
+          <span className="hp-stage-glow"/>
+          <span className="hp-stage-ring"/>
+          <figure className="hp-arch"><img src="/images/hero-dish-curry.jpg" alt="" width="860" height="1080" fetchpriority="high"/></figure>
+          <figure className="hp-bubble one"><img src="/images/hero-dish-biryani.jpg" alt="" width="520" height="520"/></figure>
+          <figure className="hp-bubble two"><img src="/images/hero-dish-pizza.jpg" alt="" width="520" height="520"/></figure>
+          <div className="hp-sticker">
+            <svg viewBox="0 0 120 120"><defs><path id="hp-sticker-path" d="M60 60m-45 0a45 45 0 1 1 90 0a45 45 0 1 1-90 0"/></defs><text><textPath href="#hp-sticker-path" textLength="279" lengthAdjust="spacing">FIRST ORDER • 50% OFF • WELCOME50 •</textPath></text></svg>
+            <b>50%<small>off</small></b>
+          </div>
+          <div className="hp-float hp-track-card">
+            <div className="hp-track-top">
+              <span className="hp-track-icon"><Bike size={18}/></span>
+              <span className="hp-track-text"><b>Arriving in 12 min</b><small>Your rider is 1.8 km away</small></span>
+              <span className="hp-live"><i/>Live</span>
+            </div>
+            <div className="hp-mini-map">
+              <svg viewBox="0 0 252 72" width="252" height="72">
+                <path className="street" d="M0 22H252M0 58H252M64 0V72M150 0V72M214 0V72"/>
+                <rect className="park" x="160" y="30" width="46" height="20" rx="6"/>
+                <path className="route-base" d={heroRoute}/>
+                <path className="route-done" d={heroRoute} pathLength="1"/>
+              </svg>
+              <span className="hp-pin store"><Store size={11}/></span>
+              <span className="hp-pin home"><House size={11}/></span>
+              <span className="hp-rider-dot"/>
+            </div>
+          </div>
+          {spotlight && <div className="hp-float hp-dish-card">
+            <img src={resizedPhoto(spotlight.image, 128)} alt="" onError={showImageFallback}/>
+            <span><span className="hp-dish-top"><em>Bestseller</em><strong>{money(spotlight.discountPrice ?? spotlight.price)}</strong></span><b>{spotlight.name}</b><small><Star size={12} fill="currentColor"/>{Number(spotlight.restaurant.rating || 0).toFixed(1)} · {spotlight.restaurant.name}</small></span>
+          </div>}
         </div>
       </div>
     </section>
-
-    <section className="hx-marquee" aria-label="Popular cravings">
-      <div className="hx-marquee-track">{[...cuisineRibbon, ...cuisineRibbon].map((item, index) => {
-        const copy = index >= cuisineRibbon.length;
-        return <button type="button" className="hx-marquee-item" key={`${item.name}-${index}`} onClick={() => quickSearch(item.term)} aria-hidden={copy || undefined} tabIndex={copy ? -1 : undefined}><img src={unsplash(item.image, 120)} alt="" loading="lazy" onError={showImageFallback}/>{item.name}<i aria-hidden="true">✦</i></button>;
-      })}</div>
-    </section>
-
-    <section className="hx-wrap hx-stats" aria-label="GoFoode at a glance">
-      {!loading && stats.length >= 2
-        ? <div className="hx-stats-grid">{stats.map((stat, index) => <div className="hx-stat" key={stat.label} data-reveal style={{ "--d": `${index * 0.08}s` }}><span className="hx-stat-icon"><stat.icon size={22}/></span><span><strong><CountUp value={stat.value} suffix={stat.suffix}/></strong><span>{stat.label}</span></span></div>)}</div>
-        : <div className="hx-stats-grid">{perks.map((perk, index) => <div className="hx-stat hx-stat-text" key={perk.title} data-reveal style={{ "--d": `${index * 0.08}s` }}><span className="hx-stat-icon"><perk.icon size={22}/></span><span><strong>{perk.title}</strong><span>{perk.text}</span></span></div>)}</div>}
-    </section>
+    <LocationSheet open={locationOpen} onClose={() => setLocationOpen(false)}/>
 
     <section className="hx-section" id="services">
       <div className="hx-wrap">
         <div className="hx-head" data-reveal><div><span className="hx-kicker"><Sparkles size={13}/> One app. More convenience.</span><h2>Everything you crave, <em>all in one place.</em></h2><p>Food, groceries, table bookings, parcels and local experiences — your everyday plans, made deliciously simple.</p></div></div>
         <div className="hx-bento">{homeServices.map((service, index) => <Link to={service.to} className={`hx-service ${service.cls}`} key={service.to} data-reveal style={{ "--d": `${index * 0.07}s` }}>
           <img src={unsplash(service.image, service.cls === "food" ? 1000 : 640)} alt="" loading="lazy" onError={showImageFallback}/>
-          <span className="hx-service-icon" aria-hidden="true">{service.icon}</span>
+          <span className="hx-service-icon" aria-hidden="true"><service.icon size={20}/></span>
           <h3>{service.title}</h3><p>{service.text}</p>
           <span className="hx-service-cta">{service.cta} <ArrowRight size={15}/></span>
         </Link>)}</div>
@@ -519,16 +512,16 @@ function Home() {
     <MoodFinder dishes={dishes}/>
     <section className="hx-section hx-track">
       <div className="hx-wrap hx-track-inner">
-        <div className="hx-track-visual" data-reveal="left">
-          <div className="hx-track-frame"><img src={photos.doorstep} alt="A delivery partner handing a fresh food order to a delighted customer at her door" loading="lazy"/></div>
-          <div className="hx-float hx-track-chip a" aria-hidden="true"><span className="hx-float-icon"><MapPin size={18}/></span><span className="hx-float-text"><b>Almost there!</b><small>Your order is around the corner</small></span></div>
-          <div className="hx-float hx-track-chip b" aria-hidden="true"><span className="hx-float-icon green"><CheckCircle2 size={18}/></span><span className="hx-float-text"><b>Delivered with care</b><small>Enjoy your meal 🎉</small></span></div>
-        </div>
+        <div className="hx-track-visual" data-reveal="left"><TrackingPreview/></div>
         <div className="hx-track-copy" data-reveal="right">
           <span className="hx-kicker"><Navigation size={13}/> Live order tracking</span>
-          <h2>Track every <em>tasty moment.</em></h2>
-          <p>From the kitchen to your doorstep, see each update as it happens — and when your delivery partner shares GPS, follow them on the map.</p>
-          <TrackingTimeline/>
+          <h2>Watch your order come to you.</h2>
+          <p>Follow your rider on a real road map, with an arrival time that updates as they ride. You see the moment the kitchen accepts your order, starts cooking and hands it over.</p>
+          <ul className="hp-track-points">
+            <li><span><Navigation size={17}/></span><div><b>Live rider location</b><small>Updates the moment your rider’s phone reports a new position.</small></div></li>
+            <li><span><Clock size={17}/></span><div><b>Arrival countdown</b><small>Worked out from the road distance still to go.</small></div></li>
+            <li><span><MapPin size={17}/></span><div><b>Pin your exact door</b><small>Drop a pin when you set your address, so riders don’t have to call for directions.</small></div></li>
+          </ul>
           <Link to={user ? "/customer/orders" : "/login"} className="btn btn-primary">{user ? "Track my orders" : "Sign in to track orders"} <ArrowRight size={16}/></Link>
         </div>
       </div>
@@ -545,7 +538,6 @@ function Home() {
     <RewardsTeaser/>
     <section className="hx-wrap hx-offer-wrap" id="offers">
       <div className="hx-offer" data-reveal="zoom">
-        <span className="hx-offer-spark s1" aria-hidden="true">✦</span><span className="hx-offer-spark s2" aria-hidden="true">✦</span><span className="hx-offer-spark s3" aria-hidden="true">✦</span>
         <div className="hx-offer-copy">
           <span className="hx-kicker light"><BadgePercent size={13}/> A little extra joy</span>
           <h2>Big cravings.<br/><em>Beautifully easy.</em></h2>
@@ -556,7 +548,6 @@ function Home() {
           <img className="hx-offer-main" src={unsplash("1555939594-58d7cb561ad1", 900)} alt="" loading="lazy" onError={showImageFallback}/>
           <img className="hx-offer-mini m1" src={unsplash("1568901346375-23c9450c58cd", 260)} alt="" loading="lazy" onError={showImageFallback}/>
           <img className="hx-offer-mini m2" src={unsplash("1551024601-bec78aea704b", 260)} alt="" loading="lazy" onError={showImageFallback}/>
-          <span className="hx-badge"><svg viewBox="0 0 120 120"><defs><path id="hx-badge-path" d="M60 60m-46 0a46 46 0 1 1 92 0a46 46 0 1 1-92 0"/></defs><text><textPath href="#hx-badge-path" textLength="284">GOOD FOOD • GOOD MOOD • EVERY DAY •</textPath></text></svg><b>🍔</b></span>
         </div>
       </div>
     </section>
@@ -576,16 +567,8 @@ function Home() {
     </section>
 
     <section className="hx-section hx-stories-section">
-      <div className="hx-wrap"><div className="hx-head center" data-reveal><div><span className="hx-kicker"><Heart size={13}/> From the GoFoode community</span><h2>Good things, <em>shared by our community.</em></h2><p>Sample stories from customers and restaurant partners about using GoFoode.</p></div></div></div>
-      <div className="hx-stories" data-reveal>
-        <div className="hx-stories-track">{[0, 1, 2].flatMap(copy => communityStories.map(story => <article className="hx-story" key={`${story.name}-${copy}`} aria-hidden={copy > 0 || undefined}>
-          <div className="hx-story-top"><Quote size={26}/><span className="sample-story-label">Sample story</span></div>
-          <p>“{story.quote}”</p>
-          <div className="hx-story-author"><span className="hx-initials" style={{ background: avatarTone(story.name)[0], color: avatarTone(story.name)[1] }} aria-hidden="true">{initials(story.name)}</span><span><b>{story.name}</b><small>{story.role}</small></span></div>
-        </article>))}</div>
-      </div>
+      <div className="hx-wrap"><div className="hx-head center" data-reveal><div><span className="hx-kicker"><Star size={13}/> Ratings and reviews</span><h2>What customers are saying</h2><p>Reviews left by customers after their orders were delivered.</p></div></div></div>
       <div className="hx-wrap hx-reviews" data-reveal>
-        <div className="hx-subhead"><div><h3>Customer reviews of local restaurants</h3><p>Feedback shared by customers after their orders.</p></div><span className="hx-count">{reviews.length ? `${reviews.length} recent reviews` : "Customer reviews"}</span></div>
         {reviewError ? <p className="error-box" role="status">{reviewError}</p> : reviews.length ? <div className="feedback-grid">{reviews.slice(0, 3).map(review => <article className="feedback-card" key={review._id}><div className="feedback-stars" aria-label={`${review.rating} out of 5 stars`}>{Array.from({ length: 5 }, (_, index) => <Star key={index} size={15} fill={index < review.rating ? "currentColor" : "none"}/>)}</div><p>“{review.comment}”</p><div className="feedback-author"><span className="feedback-avatar">{review.user?.profileImage ? <img src={review.user.profileImage} alt="" onError={showImageFallback}/> : review.user?.name?.[0]?.toUpperCase() || "G"}</span><span><b>{review.user?.name || "GoFoode customer"}</b><small>{review.restaurant?.name || "Local restaurant"}</small></span></div></article>)}</div> : <div className="feedback-empty"><span className="feedback-avatar"><Star size={16}/></span><div><b>Customer reviews will appear here.</b><p>After a food order is delivered, customers can leave a review and help others discover a local favourite.</p></div><Link to="/customer/orders">View my orders <ArrowRight size={14}/></Link></div>}
       </div>
     </section>
@@ -634,7 +617,6 @@ function Footer() {
 
 const FOOD_DELIVERY_FEE = 35;
 const FOOD_TAX_RATE = 0.05;
-const foodHeroWords = ["pizza", "burger", "noodle", "dessert", "smoothie"];
 const foodCuisines = [
   { name: "Indian", terms: ["indian"], image: "1585937421612-70a008356fbe" },
   { name: "Pizza", terms: ["pizza", "italian"], image: "1565299624946-b28f40a0ae38" },
@@ -758,7 +740,7 @@ function VegMark({ type }) {
 function SpiceMeter({ level }) {
   const heat = spiceHeat[level] || 0;
   if (!heat) return null;
-  return <span className="fd-spice" aria-label={`${level} spice`}>{Array.from({ length: heat }, (_, index) => <i key={index} aria-hidden="true">🌶️</i>)}<em>{level}</em></span>;
+  return <span className="fd-spice" aria-label={`${level} spice`}>{Array.from({ length: heat }, (_, index) => <Flame key={index} size={13} aria-hidden="true"/>)}<em>{level}</em></span>;
 }
 function FoodQty({ dish, food, compact = false }) {
   const quantity = food.quantityOf(dish._id);
@@ -847,8 +829,11 @@ function FoodDeliveryPage() {
   useEffect(() => () => cancelAnimationFrame(parallaxFrame.current), []);
 
   const dishesByRestaurant = useMemo(() => { const map = new Map(); dishes.forEach(dish => { const key = String(dish.restaurant?._id || ""); map.set(key, [...(map.get(key) || []), dish]); }); return map; }, [dishes]);
-  const restaurantCards = restaurants.map(restaurant => { const own = dishesByRestaurant.get(String(restaurant._id)) || []; return { ...restaurant, cover: restaurant.coverImage || own[0]?.image || cuisinePhoto(restaurant.cuisine), dishCount: own.length }; })
-    .sort((a, b) => restaurantSort === "fastest" ? (a.deliveryTime || 35) - (b.deliveryTime || 35) || (b.rating || 0) - (a.rating || 0) : (b.rating || 0) - (a.rating || 0) || (a.deliveryTime || 35) - (b.deliveryTime || 35));
+  const restaurantCards = restaurants.map(restaurant => {
+    const own = dishesByRestaurant.get(String(restaurant._id)) || [];
+    const meters = kitchenDistanceM(restaurant, location);
+    return { ...restaurant, cover: restaurant.coverImage || own[0]?.image || cuisinePhoto(restaurant.cuisine), dishCount: own.length, meters: meters != null && meters <= SERVICE_RADIUS_M ? meters : null, eta: deliveryWindow(restaurant, meters) };
+  }).sort((a, b) => restaurantSort === "fastest" ? a.eta.from - b.eta.from || (b.rating || 0) - (a.rating || 0) : (b.rating || 0) - (a.rating || 0) || a.eta.from - b.eta.from);
   const cuisineStats = foodCuisines.map(entry => ({ ...entry, count: dishes.filter(dish => foodMatchesCuisine(dish, entry)).length })).filter(entry => entry.count > 0);
   const fastest = restaurants.length ? Math.min(...restaurants.map(restaurant => restaurant.deliveryTime || 35)) : 0;
   const topRating = restaurants.length ? Math.max(...restaurants.map(restaurant => Number(restaurant.rating) || 0)) : 0;
@@ -922,7 +907,7 @@ function FoodDeliveryPage() {
       <div className="fd-wrap fd-hero-inner">
         <div className="fd-hero-copy">
           <nav className="fd-crumbs" aria-label="Breadcrumb"><Link to="/">Home</Link><ChevronRight size={14}/><span>Food delivery</span></nav>
-          <h1 id="food-hero-title">Your <span className="hx-sr-only">favourite food</span><RotatingWord words={foodHeroWords}/> fix,<br/>delivered fresh.</h1>
+          <h1 id="food-hero-title">Order from the best kitchens near you.</h1>
           <p>Order from {restaurants.length || "local"} neighbourhood kitchens{location?.city ? ` around ${location.city}` : ""}. See prep times, ingredients and allergens before you choose.</p>
           <form className="fd-search" role="search" onSubmit={submitSearch} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) { setSuggestOpen(false); setActiveSuggest(-1); } }}>
             <div className="fd-search-box">
@@ -939,7 +924,7 @@ function FoodDeliveryPage() {
                 <span onClick={event => event.stopPropagation()}><FoodQty dish={dish} food={food} compact/></span>
               </li>)}</ul>
               <button type="button" className="fd-suggest-all" onClick={() => { setSuggestOpen(false); scrollToId("food-items"); }}>See all {dishes.filter(matchesQuery).length} matching dishes <ArrowRight size={15}/></button></>
-              : restaurantSuggestions.length === 0 && <div className="fd-suggest-empty"><span aria-hidden="true">🍽️</span><p>Nothing matches “{search.trim()}” yet. Try “paneer”, “pizza” or “smoothie”.</p></div>}
+              : restaurantSuggestions.length === 0 && <div className="fd-suggest-empty"><span aria-hidden="true"><SearchX size={24}/></span><p>Nothing matches “{search.trim()}” yet. Try “paneer”, “pizza” or “smoothie”.</p></div>}
             </div>}
           </form>
           <div className="fd-quick" aria-label="Quick filters">
@@ -966,7 +951,6 @@ function FoodDeliveryPage() {
             <FoodQty dish={dish} food={food} compact/>
           </div>)}
           {fastest > 0 && <div className="fd-badge speed"><span><Bike size={18}/></span><b>{fastest} min</b><small>fastest kitchen</small></div>}
-          <span className="fd-emoji e0" aria-hidden="true">🍕</span><span className="fd-emoji e1" aria-hidden="true">🍔</span><span className="fd-emoji e2" aria-hidden="true">🍜</span><span className="fd-emoji e3" aria-hidden="true">🧁</span>
         </div>
       </div>
     </section>
@@ -984,8 +968,8 @@ function FoodDeliveryPage() {
         <div className="fd-seg" role="group" aria-label="Sort restaurants"><button type="button" aria-pressed={restaurantSort === "rating"} className={restaurantSort === "rating" ? "on" : ""} onClick={() => setRestaurantSort("rating")}><Star size={14}/> Top rated</button><button type="button" aria-pressed={restaurantSort === "fastest"} className={restaurantSort === "fastest" ? "on" : ""} onClick={() => setRestaurantSort("fastest")}><Bike size={14}/> Fastest</button></div>
       </div>
       <div className="fd-restaurants">{restaurantCards.map((restaurant, index) => <Link to={`/restaurants/${restaurant._id}`} className="fd-rest" key={`${restaurantSort}-${restaurant._id}`} style={{ "--i": index }}>
-        <div className="fd-rest-media"><img src={restaurant.cover} alt="" loading="lazy" onError={showImageFallback}/><span className="fd-rest-time"><Clock size={13}/> {restaurant.deliveryTime || 35} min</span>{index === 0 && <span className="fd-rest-flag">{restaurantSort === "rating" ? "★ Highest rated" : "⚡ Fastest"}</span>}<span className="fd-rest-go">View menu <ArrowRight size={14}/></span></div>
-        <div className="fd-rest-body"><div className="fd-rest-top"><h3>{restaurant.name}</h3><span className="fd-rating"><Star size={12} fill="currentColor"/>{restaurant.rating ? Number(restaurant.rating).toFixed(1) : "New"}</span></div><p>{(restaurant.cuisine || []).join(" · ") || "Multi-cuisine"}</p><small><span className="fd-open-dot"/>Open now · {restaurant.dishCount} {restaurant.dishCount === 1 ? "dish" : "dishes"}{restaurant.address?.city ? ` · ${restaurant.address.city}` : ""}</small></div>
+        <div className="fd-rest-media"><img src={restaurant.cover} alt="" loading="lazy" onError={showImageFallback}/><span className="fd-rest-time"><Clock size={13}/> {restaurant.eta.from}–{restaurant.eta.to} min</span>{index === 0 && <span className="fd-rest-flag">{restaurantSort === "rating" ? "★ Highest rated" : "Fastest delivery"}</span>}<span className="fd-rest-go">View menu <ArrowRight size={14}/></span></div>
+        <div className="fd-rest-body"><div className="fd-rest-top"><h3>{restaurant.name}</h3><span className="fd-rating"><Star size={12} fill="currentColor"/>{restaurant.rating ? Number(restaurant.rating).toFixed(1) : "New"}</span></div><p>{(restaurant.cuisine || []).join(" · ") || "Multi-cuisine"}</p><small><span className="fd-open-dot"/>Open now · {restaurant.dishCount} {restaurant.dishCount === 1 ? "dish" : "dishes"}{restaurant.meters != null ? ` · ${distanceLabel(restaurant.meters)} away` : restaurant.address?.city ? ` · ${restaurant.address.city}` : ""}</small></div>
       </Link>)}</div>
     </div></section>}
 
@@ -1009,9 +993,9 @@ function FoodDeliveryPage() {
         <label className="fd-sort"><span>Sort</span><select value={sort} aria-label="Sort dishes" onChange={event => setSort(event.target.value)}>{foodSorts.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
       </div>
       {activeFilters.length > 0 && <div className="fd-active">{activeFilters.map(filter => <button type="button" key={filter.key} aria-label={`Remove filter ${filter.label}`} onClick={filter.clear}>{filter.label}<X size={13}/></button>)}<button type="button" className="fd-link" onClick={clearFilters}>Clear all</button></div>}
-      {error ? <div className="fd-empty"><span className="fd-empty-art" aria-hidden="true">🍲</span><h3>The kitchen didn't respond</h3><p>{error}</p><button type="button" className="btn btn-primary" onClick={loadAll}><RefreshCw size={15}/> Try again</button></div>
+      {error ? <div className="fd-empty"><span className="fd-empty-art" aria-hidden="true"><Soup size={44}/></span><h3>The kitchen didn't respond</h3><p>{error}</p><button type="button" className="btn btn-primary" onClick={loadAll}><RefreshCw size={15}/> Try again</button></div>
       : loading ? <div className="fd-grid">{Array.from({ length: 8 }, (_, index) => <div className="fd-dish fd-skeleton" key={index} aria-hidden="true"><span/><i/><i/><i/></div>)}</div>
-      : filtered.length === 0 ? <div className="fd-empty"><span className="fd-empty-art" aria-hidden="true">🥡</span><h3>No dishes match this selection</h3><p>Try another search or cuisine, or clear a filter to see the full menu.</p><button type="button" className="btn btn-primary" onClick={clearFilters}>Show all dishes</button></div>
+      : filtered.length === 0 ? <div className="fd-empty"><span className="fd-empty-art" aria-hidden="true"><SearchX size={44}/></span><h3>No dishes match this selection</h3><p>Try another search or cuisine, or clear a filter to see the full menu.</p><button type="button" className="btn btn-primary" onClick={clearFilters}>Show all dishes</button></div>
       : <><div className="fd-grid">{filtered.slice(0, limit).map(renderDish)}</div>
         {filtered.length > limit && <div className="fd-more"><span>Showing {limit} of {filtered.length} dishes</span><i><i style={{ width: `${limit / filtered.length * 100}%` }}/></i><button type="button" className="btn btn-outline" onClick={() => setLimit(current => current + 12)}>Show more dishes <ChevronRight size={16}/></button></div>}</>}
     </div></section>
@@ -1076,7 +1060,7 @@ function RestaurantDetail() {
   const jumpTo = id => { const element = document.getElementById(id); if (!element) return; window.scrollTo({ top: element.getBoundingClientRect().top + window.scrollY - 150, behavior: prefersReducedMotion() ? "auto" : "smooth" }); };
 
   if (!data) return <><Header/><main className="fd-page"><div className="fd-rhero loading" aria-busy="true"><div className="fd-wrap"><div className="fd-rhero-card fd-skeleton-card"><span/><i/><i/></div></div></div><div className="fd-wrap fd-menu-loading">{Array.from({ length: 3 }, (_, index) => <div className="fd-menu-item fd-skeleton-row" key={index}><i/><span/></div>)}</div></main><Footer/></>;
-  if (data.error) return <><Header/><main className="fd-page"><div className="fd-wrap"><div className="fd-empty fd-notfound"><span className="fd-empty-art" aria-hidden="true">🍽️</span><h3>This restaurant isn't taking orders</h3><p>It may be closed right now, or the link is out of date. Plenty of other kitchens are open.</p><Link className="btn btn-primary" to="/food">Browse restaurants <ArrowRight size={15}/></Link></div></div></main><Footer/></>;
+  if (data.error) return <><Header/><main className="fd-page"><div className="fd-wrap"><div className="fd-empty fd-notfound"><span className="fd-empty-art" aria-hidden="true"><UtensilsCrossed size={44}/></span><h3>This restaurant isn't taking orders</h3><p>It may be closed right now, or the link is out of date. Plenty of other kitchens are open.</p><Link className="btn btn-primary" to="/food">Browse restaurants <ArrowRight size={15}/></Link></div></div></main><Footer/></>;
 
   const restaurant = data.restaurant;
   const cover = restaurant.coverImage || menu.find(item => item.image)?.image || cuisinePhoto(restaurant.cuisine, 1400);
@@ -1142,7 +1126,7 @@ function RestaurantDetail() {
           <button type="button" className={`fd-toggle ${vegOnly ? "on" : ""}`} aria-pressed={vegOnly} onClick={() => setVegOnly(!vegOnly)}><VegMark type="veg"/> Veg only</button>
           {sections.length > 1 && <nav className="fd-menu-tabs" aria-label="Menu sections">{sections.map(section => <button type="button" key={section.id} className={activeSection === section.id ? "on" : ""} aria-current={activeSection === section.id ? "true" : undefined} onClick={() => jumpTo(section.id)}>{section.title}<small>{section.items.length}</small></button>)}</nav>}
         </div>
-        {sections.length === 0 ? <div className="fd-empty"><span className="fd-empty-art" aria-hidden="true">🔍</span><h3>{menu.length ? "No dishes match" : "The menu is being updated"}</h3><p>{menu.length ? "Try a different search, or turn off the veg filter." : "This kitchen hasn't listed any dishes yet. Check back soon."}</p>{menu.length > 0 && <button type="button" className="btn btn-primary" onClick={() => { setMenuSearch(""); setVegOnly(false); }}>Show the full menu</button>}</div>
+        {sections.length === 0 ? <div className="fd-empty"><span className="fd-empty-art" aria-hidden="true"><SearchX size={44}/></span><h3>{menu.length ? "No dishes match" : "The menu is being updated"}</h3><p>{menu.length ? "Try a different search, or turn off the veg filter." : "This kitchen hasn't listed any dishes yet. Check back soon."}</p>{menu.length > 0 && <button type="button" className="btn btn-primary" onClick={() => { setMenuSearch(""); setVegOnly(false); }}>Show the full menu</button>}</div>
         : sections.map(section => <section className="fd-menu-section" id={section.id} key={section.id} aria-labelledby={`${section.id}-title`}>
           <header><h2 id={`${section.id}-title`}>{section.title}<span>{section.items.length}</span></h2><p>{section.note}</p></header>
           {section.items.map(renderItem)}
@@ -1156,7 +1140,7 @@ function RestaurantDetail() {
           <div className="fd-rcart-total"><span>Item total</span><b>{money(food.subtotal)}</b></div>
           <p className="fd-rcart-fine">A ₹{FOOD_DELIVERY_FEE} delivery fee per restaurant and 5% tax are added at checkout.</p>
           <Link to="/cart" className="btn btn-primary btn-full">Go to checkout <ArrowRight size={16}/></Link>
-        </> : <div className="fd-rcart-empty"><span aria-hidden="true">🛍️</span><p>Add a dish and it will show up here.</p></div>}
+        </> : <div className="fd-rcart-empty"><span aria-hidden="true"><ShoppingBag size={34}/></span><p>Add a dish and it will show up here.</p></div>}
       </aside>
     </div>
   </main>
@@ -1238,7 +1222,7 @@ function DashboardLayout({ title, subtitle, items, children }) {
       </header>
       <main className="ds-content">
         <div className="ds-intro">
-          <div>{isOverview && <span className="ds-greet">{greeting()}, {user?.name?.split(" ")[0] || "there"} 👋</span>}<h1>{title}</h1>{subtitle && <p>{subtitle}</p>}</div>
+          <div>{isOverview && <span className="ds-greet">{greeting()}, {user?.name?.split(" ")[0] || "there"}</span>}<h1>{title}</h1>{subtitle && <p>{subtitle}</p>}</div>
           <span className="ds-date"><CalendarDays size={15}/>{new Date().toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</span>
         </div>
         {children}
@@ -1369,8 +1353,8 @@ function Stat({ label,value,icon:Icon, tone="orange", hint }) { return <div clas
 function DataTable({ columns, rows, empty="No records found." }) { return <div className="table-wrap"><table><thead><tr>{columns.map(c=><th key={c.key}>{c.label}</th>)}</tr></thead><tbody>{rows.length?rows.map((row,i)=><tr key={row._id||i}>{columns.map(c=><td key={c.key}>{c.render?c.render(row):row[c.key]??"—"}</td>)}</tr>):<tr><td colSpan={columns.length} className="table-empty">{empty}</td></tr>}</tbody></table></div>; }
 function Badge({ children }) { return <span className={`badge badge-${String(children).toLowerCase().replaceAll(" ","-")}`}>{String(children).replaceAll("_"," ")}</span>; }
 function CustomerDashboard() {
-  const [orders,setOrders]=useState([]),[groceryOrders,setGroceryOrders]=useState([]),[cart,setCart]=useState({items:[]}),[notifications,setNotifications]=useState([]),[error,setError]=useState("");
-  const load=()=>Promise.all([api.get("/orders/my-orders"),api.get("/grocery/orders/mine"),api.get("/cart"),api.get("/notifications")]).then(([o,g,c,n])=>{setOrders(o.data);setGroceryOrders(g.data);setCart(c.data);setNotifications(n.data);setError("")}).catch(err=>setError(err.response?.data?.message||"Could not load your account overview."));
+  const [orders,setOrders]=useState([]),[groceryOrders,setGroceryOrders]=useState([]),[cart,setCart]=useState({items:[]}),[error,setError]=useState("");
+  const load=()=>Promise.all([api.get("/orders/my-orders"),api.get("/grocery/orders/mine"),api.get("/cart")]).then(([o,g,c])=>{setOrders(o.data);setGroceryOrders(g.data);setCart(c.data);setError("")}).catch(err=>setError(err.response?.data?.message||"Could not load your account overview."));
   useEffect(()=>{load()},[]);
   return <DashboardLayout title="Customer overview" subtitle="Your food journey, all in one place." items={customerNav}>
     {error&&<p className="error-box" role="alert">{error} <button className="btn btn-outline btn-small" onClick={load}>Try again</button></p>}
@@ -1496,7 +1480,7 @@ function OrderTrackingPage(){
   };
 
   if (!order) return <><Header/><main className="fd-page fd-track"><div className="fd-wrap fd-track-loading">{error
-    ? <div className="fd-empty"><span className="fd-empty-art" aria-hidden="true">📦</span><h3>We couldn't open that order</h3><p>{error}</p><Link to="/customer/orders" className="btn btn-primary">See your orders <ArrowRight size={15}/></Link></div>
+    ? <div className="fd-empty"><span className="fd-empty-art" aria-hidden="true"><PackageSearch size={44}/></span><h3>We couldn't open that order</h3><p>{error}</p><Link to="/customer/orders" className="btn btn-primary">See your orders <ArrowRight size={15}/></Link></div>
     : <div className="fd-track-skeleton" aria-busy="true" aria-label="Loading your order"><span/><i/><i/><i/></div>}</div></main><Footer/></>;
 
   const status = order.orderStatus || "placed";
@@ -1517,10 +1501,6 @@ function OrderTrackingPage(){
   const currentIndex = Math.max(0, foodStages.findIndex(entry => entry.key === status));
   const stage = foodStages[currentIndex];
   const stageProgress = failed ? 0 : currentIndex / (foodStages.length - 1) * 100;
-  const gps = order.delivery?.currentLocation?.coordinates;
-  const rider = order.delivery?.deliveryPartner;
-  const drop = order.delivery?.dropLocation || order.deliveryAddress;
-  const destination = [drop?.street, drop?.city, drop?.state, drop?.postalCode].filter(Boolean).join(", ");
   const placedAt = new Date(order.placedAt || order.createdAt);
   const etaMinutes = restaurantInfo?.deliveryTime;
   const eta = etaMinutes ? new Date(placedAt.getTime() + etaMinutes * 60000) : null;
@@ -1533,8 +1513,20 @@ function OrderTrackingPage(){
   const cover = restaurantCover(restaurantInfo, 1400);
   const shownRating = hoverRating || rating;
 
+  const live = !failed && !awaitingPayment;
+  const hasMain = (awaitingPayment && payment) || failed || delivered;
   return <><Header/><main className="fd-page fd-track">
-    <section className={`fd-track-hero ${failed ? "failed" : delivered ? "done" : ""}`} aria-labelledby="fd-track-title">
+    {live ? <section className="lt-hero">
+      {celebrate && <div className="fd-confetti-rain" aria-hidden="true">{Array.from({ length: 44 }, (_, index) => <i key={index} style={{ "--n": index, "--x": `${(index * 37) % 100}%`, "--delay": `${((index * 53) % 17) * 0.09}s`, "--spin": `${(index * 71) % 360 + 360}deg`, "--dur": `${2.4 + ((index * 29) % 10) * 0.12}s` }}/>)}</div>}
+      <div className="fd-wrap">
+        <div className="lt-hero-top">
+          <nav className="fd-crumbs" aria-label="Breadcrumb"><Link to="/customer/orders">My orders</Link><ChevronRight size={14}/><span>{order.orderNumber}</span></nav>
+          <div className="lt-meta"><span><Store size={14}/>{order.restaurant?.name}</span><span><ShoppingBag size={14}/>{itemCount} {itemCount === 1 ? "item" : "items"} · {money(order.totalAmount)}</span><span><Clock size={14}/>Placed {placedAt.toLocaleString([], { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true })}</span></div>
+        </div>
+        {banner && <p className={`fd-placed-banner lt-banner ${banner.tone === "success" ? "" : banner.tone}`} key={banner.text}>{banner.tone === "success" ? <CheckCircle2 size={18}/> : banner.tone === "error" ? <X size={18}/> : <Hourglass size={18}/>}{banner.text}</p>}
+        <LiveTracker order={order} onOrderEvent={load}/>
+      </div>
+    </section> : <section className={`fd-track-hero ${failed ? "failed" : delivered ? "done" : ""}`} aria-labelledby="fd-track-title">
       <div className="fd-hero-bg" aria-hidden="true"><span className="fd-glow a"/><span className="fd-glow b"/><span className="fd-grain"/></div>
       {celebrate && <div className="fd-confetti-rain" aria-hidden="true">{Array.from({ length: 44 }, (_, index) => <i key={index} style={{ "--n": index, "--x": `${(index * 37) % 100}%`, "--delay": `${((index * 53) % 17) * 0.09}s`, "--spin": `${(index * 71) % 360 + 360}deg`, "--dur": `${2.4 + ((index * 29) % 10) * 0.12}s` }}/>)}</div>}
       <div className="fd-wrap fd-track-hero-inner">
@@ -1548,33 +1540,22 @@ function OrderTrackingPage(){
         </div>
         <div className="fd-orb-wrap">
           <svg className="fd-orb-ring" viewBox="0 0 160 160" aria-hidden="true"><circle className="track" cx="80" cy="80" r="72"/><circle className={`bar ${late ? "late" : ""}`} cx="80" cy="80" r="72" pathLength="100" style={{ strokeDashoffset: 100 - ringPct }}/></svg>
-          <div className={`fd-orb ${failed ? "failed" : ""}`}><span key={status}>{failed ? "😔" : awaitingPayment ? "💳" : stage.art}</span></div>
+          <div className={`fd-orb ${failed ? "failed" : ""}`}><span key={status}>{failed ? <X size={46}/> : awaitingPayment ? <CreditCard size={46}/> : <stage.icon size={46}/>}</span></div>
           {showEta ? <div className="fd-orb-eta"><b>{late ? "Any minute" : `${minutesLeft} min`}</b><small>{late ? `past the ${etaMinutes}-min estimate` : `left · around ${eta.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true })}`}</small></div>
             : <div className="fd-orb-eta"><b>{failed ? (status === "rejected" ? "Not accepted" : "Cancelled") : awaitingPayment ? "Payment due" : stage.label}</b><small>{delivered ? "Order complete" : failed ? "No further updates" : awaitingPayment ? "Pay to confirm" : `Step ${currentIndex + 1} of ${foodStages.length}`}</small></div>}
         </div>
       </div>
-    </section>
+    </section>}
 
-    <div className="fd-wrap fd-track-grid">
-      <div className="fd-track-main">
+    <div className={`fd-wrap fd-track-grid ${live ? "lt-after" : ""} ${hasMain ? "" : "solo"}`}>
+      {hasMain && <div className="fd-track-main">
         {awaitingPayment && payment && <PaymentActionCard payment={payment} now={now} onChanged={load} notify={notify}/>}
-        {failed ? <div className="fd-panel fd-failed-card"><span aria-hidden="true">{restoredToCart ? "🛒" : "🍽️"}</span><div><h2>{restoredToCart ? "Your items are waiting" : "Still hungry?"}</h2><p>{restoredToCart ? "We put everything from this checkout back in your cart, so you can pick up where you left off." : "Add the same dishes back to your cart, or find another kitchen that's open now."}</p>{refundShown && refundAmount > 0 && <p className="fd-refund-line"><Undo2 size={15}/>{order.paymentStatus === "refund_pending" ? `Refund of ${exactMoney(refundAmount)} in progress to your original payment method.` : `${exactMoney(refundAmount)} refunded to your original payment method.`}</p>}</div><div className="fd-failed-actions">{restoredToCart ? <Link to="/cart" className="btn btn-primary"><ShoppingBag size={15}/> Review cart</Link> : <button type="button" className="btn btn-primary" disabled={reordering} onClick={reorder}><RotateCcw size={15}/>{reordering ? "Adding…" : "Order again"}</button>}<Link to="/food" className="btn btn-outline">Browse food</Link></div></div>
-        : awaitingPayment ? null : <div className="fd-panel fd-progress-card">
-          <div className="fd-progress-head"><h2>Order progress</h2><span>{Math.round(stageProgress)}%</span></div>
-          <div className="fd-progress-bar" aria-hidden="true"><i style={{ width: `${Math.max(3, stageProgress)}%` }}/></div>
-          <ol className="fd-stages">{foodStages.map((entry, index) => { const Icon = entry.icon; const state = index < currentIndex || delivered ? "done" : index === currentIndex ? "current" : ""; return <li className={state} key={entry.key} aria-current={index === currentIndex ? "step" : undefined}>
-            <span className="fd-stage-dot">{state === "done" ? <Check size={15} strokeWidth={3}/> : <Icon size={15}/>}</span><b>{entry.label}</b>
-          </li>; })}</ol>
-        </div>}
+        {failed ? <div className="fd-panel fd-failed-card"><span aria-hidden="true">{restoredToCart ? <ShoppingBag size={30}/> : <Utensils size={30}/>}</span><div><h2>{restoredToCart ? "Your items are waiting" : "Still hungry?"}</h2><p>{restoredToCart ? "We put everything from this checkout back in your cart, so you can pick up where you left off." : "Add the same dishes back to your cart, or find another kitchen that's open now."}</p>{refundShown && refundAmount > 0 && <p className="fd-refund-line"><Undo2 size={15}/>{order.paymentStatus === "refund_pending" ? `Refund of ${exactMoney(refundAmount)} in progress to your original payment method.` : `${exactMoney(refundAmount)} refunded to your original payment method.`}</p>}</div><div className="fd-failed-actions">{restoredToCart ? <Link to="/cart" className="btn btn-primary"><ShoppingBag size={15}/> Review cart</Link> : <button type="button" className="btn btn-primary" disabled={reordering} onClick={reorder}><RotateCcw size={15}/>{reordering ? "Adding…" : "Order again"}</button>}<Link to="/food" className="btn btn-outline">Browse food</Link></div></div>
+        : null}
 
-        {!failed && !awaitingPayment && <div className="fd-panel fd-map-card">
-          <div className="fd-map-head"><div><span className="fd-eyebrow"><Navigation size={14}/>Delivery partner</span><h2>{gps ? "Rider location is live" : rider ? `${rider.name} is delivering your order` : delivered ? "Delivered to your address" : "Waiting for a delivery partner"}</h2><p>{gps ? "The map shows the rider's latest shared location and your address." : rider ? "Their location appears here as soon as they share GPS." : delivered ? "Thanks for ordering with GoFoode." : status === "ready" ? "Your order is packed, and delivery partners nearby have been notified to pick it up." : "A rider is assigned once the restaurant marks your order ready."}</p></div><span className={`fd-gps ${gps ? "live" : ""}`}><i/>{gps ? "Live GPS" : "GPS pending"}</span></div>
-          {rider && <div className="fd-rider"><span className="fd-rider-avatar">{rider.profileImage ? <img src={rider.profileImage} alt="" onError={showImageFallback}/> : (rider.name || "R")[0].toUpperCase()}</span><div><b>{rider.name}</b><small>Your GoFoode delivery partner</small></div>{rider.phone && <a className="fd-round" href={`tel:${rider.phone}`} aria-label={`Call ${rider.name}`}><Phone size={17}/></a>}</div>}
-          {gps || destination ? <div className="fd-map"><GoogleMap title="Delivery partner location and destination" latitude={gps?.[1]} longitude={gps?.[0]} destination={destination}/></div> : <div className="fd-map-empty"><MapPin size={26}/><b>The map appears once location details are available</b></div>}
-        </div>}
 
         {delivered && (order.customerReview || submittedReview
-          ? <div className="fd-panel fd-review-done"><span aria-hidden="true">💛</span><div><b>Thanks for your feedback!</b><small>{reviewMessage || "Your review helps other customers discover local favourites."}</small></div></div>
+          ? <div className="fd-panel fd-review-done"><span aria-hidden="true"><Heart size={26} fill="currentColor"/></span><div><b>Thanks for your feedback!</b><small>{reviewMessage || "Your review helps other customers discover local favourites."}</small></div></div>
           : <form className="fd-panel fd-review" onSubmit={submitReview}>
             <span className="fd-eyebrow"><Star size={14}/>How was it?</span>
             <h2>Rate your order from {order.restaurant?.name}</h2>
@@ -1587,7 +1568,7 @@ function OrderTrackingPage(){
             {reviewError && <p className="fd-note error" role="alert">{reviewError}</p>}
             <button className="btn btn-primary" disabled={reviewBusy}>{reviewBusy ? "Sending…" : "Share feedback"}</button>
           </form>)}
-      </div>
+      </div>}
 
       <aside className="fd-track-side">
         <div className="fd-panel fd-receipt">
@@ -1812,11 +1793,14 @@ function DeliveryDashboard() {
   const [jobs,setJobs]=useState([]),[pickupRequests,setPickupRequests]=useState([]),[earnings,setEarnings]=useState({completed:0,estimatedEarnings:0});
   const [notifications,setNotifications]=useState([]);
   const [gpsError,setGpsError]=useState(""),[availabilityError,setAvailabilityError]=useState(""),[locationRetry,setLocationRetry]=useState(0),[isAvailable,setIsAvailable]=useState(false);
+  // Demo ride (development and demo builds): replays the route through the GPS endpoint, so real GPS pauses meanwhile.
+  const [simulatingId,setSimulatingId]=useState(null);
+  const demoTools=import.meta.env.DEV||import.meta.env.VITE_DEMO_TOOLS==="true";
   const load=()=>Promise.all([api.get("/delivery/assignments"),api.get("/delivery/earnings"),api.get("/delivery/availability"),api.get("/delivery/genie-requests"),api.get("/notifications")]).then(([j,e,a,p,n])=>{setJobs(j.data);setEarnings(e.data);setIsAvailable(a.data.isAvailable);setPickupRequests(p.data);setNotifications(n.data);setAvailabilityError("")}).catch(error=>setAvailabilityError(error.response?.data?.message||"Could not load delivery assignments."));
   useEffect(()=>{load();const timer=setInterval(load,10000);return()=>clearInterval(timer)},[]);
   useEffect(()=>{
     const active=jobs.find(j=>j.deliveryPartner && ["accepted","picked_up","on_the_way"].includes(j.status));
-    if(!active){setGpsError("");return}
+    if(!active||simulatingId){setGpsError("");return}
     if(!navigator.geolocation){setGpsError("This browser does not support live location sharing.");return}
     setGpsError("");
     const watch=navigator.geolocation.watchPosition(async position=>{
@@ -1826,7 +1810,7 @@ function DeliveryDashboard() {
       setGpsError(error.code===1?"Location access is blocked. Allow it in your browser's site settings to share your live delivery location.":error.code===2?"Your device could not determine a location. Check that location services are enabled.":"Getting your live location timed out. Check location services and try again.");
     }, {enableHighAccuracy:true,maximumAge:5000,timeout:15000});
     return ()=>navigator.geolocation.clearWatch(watch);
-  },[jobs,locationRetry]);
+  },[jobs,locationRetry,simulatingId]);
   useEffect(()=>{
     const active=pickupRequests.find(request=>String(request.deliveryPartner?._id||request.deliveryPartner)===user.id&&["accepted","picked_up","on_the_way"].includes(request.status));
     if(!active)return;
@@ -1842,7 +1826,7 @@ function DeliveryDashboard() {
     if(position){setGpsError("");setLocationRetry(retry=>retry+1)}
   };
   const accept=async id=>{setAvailabilityError("");try{await api.patch(`/delivery/assignments/${id}/accept`);load()}catch(error){setAvailabilityError(error.response?.data?.message||"Could not accept this delivery.")}};
-  const advance=async d=>{const next={accepted:"picked_up",picked_up:"on_the_way",on_the_way:"delivered"}[d.status];if(next){try{await api.patch(`/delivery/assignments/${d._id}/status`,{status:next});load()}catch(error){setAvailabilityError(error.response?.data?.message||"Could not update delivery status.")}}};
+  const advance=async d=>{const next={accepted:"picked_up",picked_up:"on_the_way",on_the_way:"delivered"}[d.status];if(next==="delivered"&&simulatingId===d._id)setSimulatingId(null);if(next){try{await api.patch(`/delivery/assignments/${d._id}/status`,{status:next});load()}catch(error){setAvailabilityError(error.response?.data?.message||"Could not update delivery status.")}}};
   const acceptPickup=async id=>{setAvailabilityError("");try{await api.patch(`/delivery/genie-requests/${id}/accept`);await load()}catch(error){setAvailabilityError(error.response?.data?.message||"Could not accept this pickup request.")}};
   const advancePickup=async request=>{const next={accepted:"picked_up",picked_up:"on_the_way",on_the_way:"delivered"}[request.status];if(!next)return;setAvailabilityError("");try{await api.patch(`/delivery/genie-requests/${request._id}/status`,{status:next});await load()}catch(error){setAvailabilityError(error.response?.data?.message||"Could not update this pickup delivery.")}};
   const activeJobs=jobs.filter(job=>String(job.deliveryPartner?._id||job.deliveryPartner)===user.id&&["accepted","picked_up","on_the_way"].includes(job.status));
@@ -1856,13 +1840,11 @@ function DeliveryDashboard() {
       {availabilityError&&<p className="error-box" role="alert">{availabilityError}</p>}
       {gpsError&&<div className="gps-error-row"><p className="error-box" role="status">{gpsError}</p><button className="btn btn-outline btn-small" onClick={retryGps} disabled={locationStatus==="loading"||locationStatus==="retrying"}>{locationStatus==="loading"||locationStatus==="retrying"?"Finding location…":"Retry GPS"}</button><Link className="link-orange" to="/profile">Profile settings</Link></div>}
       {jobs.map(job=>{
-        const destination=[job.order?.deliveryAddress?.street,job.order?.deliveryAddress?.city,job.order?.deliveryAddress?.state].filter(Boolean).join(", ");
-        const riderCoordinates=job.currentLocation?.coordinates;
         const isAssigned=String(job.deliveryPartner?._id||job.deliveryPartner)===user.id;
-        return <article className="delivery-job" key={job._id}><div className="job-card"><div className="job-icon"><Bike/></div><div className="list-grow"><b>{job.order?.orderNumber||"Order assignment"}</b><small>{job.order?.restaurant?.name} → {job.order?.deliveryAddress?.city}</small><small>Status: {job.status}</small>{isAssigned&&["accepted","picked_up","on_the_way"].includes(job.status)&&<small className="gps-sharing-label"><MapPin size={12}/> Live GPS sharing is active while location is allowed.</small>}</div>
+        return <article className="delivery-job" key={job._id}><div className="job-card"><div className="job-icon"><Bike/></div><div className="list-grow"><b>{job.order?.orderNumber||"Order assignment"}</b><small>{job.order?.restaurant?.name} → {job.order?.deliveryAddress?.city}</small><small>Status: {job.status}</small>{isAssigned&&["accepted","picked_up","on_the_way"].includes(job.status)&&<small className="gps-sharing-label"><MapPin size={12}/> {simulatingId===job._id?"Demo ride is sending your location.":"Live GPS sharing is active while location is allowed."}</small>}</div>
           {!job.deliveryPartner?<button className="btn btn-primary btn-small" disabled={!isAvailable} onClick={()=>accept(job._id)}>{isAvailable?"Accept job":"Go online to accept"}</button>:isAssigned&&["accepted","picked_up","on_the_way"].includes(job.status)?<button className="btn btn-outline btn-small" onClick={()=>advance(job)}>{({accepted:"Picked up",picked_up:"On the way",on_the_way:"Delivered"})[job.status]}</button>:<Badge>{job.status}</Badge>}
         </div>
-        {isAssigned&&<details className="delivery-map-details"><summary>View route in Google Maps</summary><GoogleMap title="Delivery route in Google Maps" latitude={riderCoordinates?.[1]} longitude={riderCoordinates?.[0]} destination={destination}/></details>}
+        {isAssigned&&["accepted","picked_up","on_the_way"].includes(job.status)&&<RiderRoute job={job} demoTools={demoTools} simulating={simulatingId===job._id} onSimulate={setSimulatingId}/>}
         </article>;
       })}
       {!jobs.length&&!availabilityError&&<p className="muted">No delivery assignments right now.</p>}
@@ -1966,7 +1948,7 @@ function CartPage(){
   const routerLocation = useLocation();
   const [flash, notify, closeFlash] = useFlash();
   const food = useFoodCart(notify);
-  const blankAddress = () => ({ name: user?.name || "", phone: user?.phone || "", street: "", city: location?.city || "", state: location?.state || "", postalCode: location?.postalCode || "", instructions: "", latitude: location?.latitude ?? null, longitude: location?.longitude ?? null });
+  const blankAddress = () => ({ name: user?.name || "", phone: user?.phone || "", street: location?.street || "", city: location?.city || "", state: location?.state || "", postalCode: location?.postalCode || "", instructions: "", latitude: location?.latitude ?? null, longitude: location?.longitude ?? null });
   const fromSaved = saved => ({ name: saved.name || user?.name || "", phone: saved.phone || user?.phone || "", street: saved.street || "", city: saved.city || "", state: saved.state || "", postalCode: saved.postalCode || "", instructions: "", latitude: saved.location?.coordinates?.[1] ?? null, longitude: saved.location?.coordinates?.[0] ?? null });
   const [step, setStep] = useState(1);
   const [address, setAddress] = useState(() => routerLocation.state?.deliveryAddress ? fromSaved(routerLocation.state.deliveryAddress) : blankAddress());
@@ -1991,7 +1973,7 @@ function CartPage(){
       if (preferred) { setSelectedAddress(preferred._id); setAddress(fromSaved(preferred)); }
     }).catch(() => {});
   }, []);
-  useEffect(() => { if (location) setAddress(current => ({ ...current, city: current.city || location.city || "", state: current.state || location.state || "", postalCode: current.postalCode || location.postalCode || "", latitude: current.latitude ?? location.latitude ?? null, longitude: current.longitude ?? location.longitude ?? null })); }, [location]);
+  useEffect(() => { if (location) setAddress(current => ({ ...current, street: current.street || location.street || "", city: current.city || location.city || "", state: current.state || location.state || "", postalCode: current.postalCode || location.postalCode || "", latitude: current.latitude ?? location.latitude ?? null, longitude: current.longitude ?? location.longitude ?? null })); }, [location]);
   useEffect(() => { if (user) setAddress(current => ({ ...current, name: current.name || user.name || "", phone: current.phone || user.phone || "" })); }, [user]);
 
   const bill = foodBill(food.lines, applied?.discount || 0, { freeDelivery: plus });
@@ -2087,7 +2069,7 @@ function CartPage(){
     <div className="fd-wrap">
       {!food.loaded ? <div className="fd-checkout-grid"><div className="fd-panel fd-skeleton-panel" aria-busy="true"><i/><i/><i/></div><div className="fd-panel fd-skeleton-panel"><i/><i/></div></div>
       : empty ? <div className="fd-cart-empty">
-        <div className="fd-empty-plate" aria-hidden="true"><span>🍽️</span><i/><i/><i/></div>
+        <div className="fd-empty-plate" aria-hidden="true"><span><ShoppingBag size={54}/></span></div>
         <h2>Your cart is hungry</h2><p>Add a few dishes from a local kitchen and they'll show up here.</p>
         {couponNote?.tone === "info" && <p className="fd-pending-coupon" role="status"><TicketPercent size={16}/>{couponNote.text}</p>}
         <Link className="btn btn-primary" to="/food">Browse food <ArrowRight size={16}/></Link>
@@ -2110,11 +2092,11 @@ function CartPage(){
             </div>)}
             <div className="fd-coupons">
               <div className="fd-coupons-head"><TicketPercent size={18}/><b>Offers & coupons</b></div>
-              {applied ? <div className="fd-applied" key={burst}><span className="fd-applied-icon" aria-hidden="true">🎉</span><div><b>{applied.code} applied</b><small>You save {money(bill.discount)} on this order</small></div><button type="button" className="fd-link" onClick={removeCoupon}>Remove</button><span className="fd-burst" aria-hidden="true">{Array.from({ length: 14 }, (_, index) => <i key={index} style={{ "--n": index }}/>)}</span></div>
+              {applied ? <div className="fd-applied" key={burst}><span className="fd-applied-icon" aria-hidden="true"><Check size={20} strokeWidth={3}/></span><div><b>{applied.code} applied</b><small>You save {money(bill.discount)} on this order</small></div><button type="button" className="fd-link" onClick={removeCoupon}>Remove</button><span className="fd-burst" aria-hidden="true">{Array.from({ length: 14 }, (_, index) => <i key={index} style={{ "--n": index }}/>)}</span></div>
               : <form className="fd-coupon-form" onSubmit={event => { event.preventDefault(); applyCoupon(couponInput); }}><input value={couponInput} aria-label="Coupon code" placeholder="Enter a coupon code" onChange={event => setCouponInput(event.target.value.toUpperCase())}/><button className="btn btn-outline" disabled={couponBusy}>{couponBusy ? "Checking…" : "Apply"}</button></form>}
               {couponNote && <p className={`fd-note ${couponNote.tone}`} role="status">{couponNote.text}</p>}
               {offers.length > 0 && <div className="fd-offer-list">{offers.map(offer => { const ready = bill.subtotal >= (offer.minOrder || 0); const isApplied = applied?.code === offer.code; return <div className={`fd-offer ${ready ? "" : "locked"} ${isApplied ? "applied" : ""}`} key={offer._id}>
-                <div className="fd-offer-copy"><span className="fd-offer-top"><code>{offer.code}</code>{offer.personal && <em className="mine">🎁 Your reward</em>}{bestOffer === offer.code && !isApplied && <em>Best for this cart</em>}</span><p>{offerSummary(offer)}</p><small>{isApplied ? "Applied to this order" : ready ? `Saves about ${money(offerSaving(offer))} on this cart` : `Add ${money(offer.minOrder - bill.subtotal)} more to unlock`}</small>{!ready && <span className="fd-offer-meter"><i style={{ width: `${Math.min(100, bill.subtotal / offer.minOrder * 100)}%` }}/></span>}</div>
+                <div className="fd-offer-copy"><span className="fd-offer-top"><code>{offer.code}</code>{offer.personal && <em className="mine"><Gift size={12}/> Your reward</em>}{bestOffer === offer.code && !isApplied && <em>Best for this cart</em>}</span><p>{offerSummary(offer)}</p><small>{isApplied ? "Applied to this order" : ready ? `Saves about ${money(offerSaving(offer))} on this cart` : `Add ${money(offer.minOrder - bill.subtotal)} more to unlock`}</small>{!ready && <span className="fd-offer-meter"><i style={{ width: `${Math.min(100, bill.subtotal / offer.minOrder * 100)}%` }}/></span>}</div>
                 <button type="button" className="fd-offer-apply" disabled={!ready || isApplied || couponBusy} onClick={() => applyCoupon(offer.code)}>{isApplied ? <><Check size={14} strokeWidth={3}/> Applied</> : ready ? "Apply" : "Locked"}</button>
               </div>; })}</div>}
             </div>
@@ -2169,7 +2151,7 @@ function CartPage(){
           <div><span>Taxes (5%)</span><b>{exactMoney(bill.tax)}</b></div>
           {bill.discount > 0 && <div className="save"><span>Coupon {applied?.code}</span><b>−{money(bill.discount)}</b></div>}
           <div className="total"><span>To pay</span><b key={Math.round(bill.total)}>{exactMoney(bill.total)}</b></div>
-          {bill.discount > 0 && <p className="fd-bill-save">🎉 You're saving {money(bill.discount)} on this order</p>}
+          {bill.discount > 0 && <p className="fd-bill-save"><BadgePercent size={15}/> You're saving {money(bill.discount)} on this order</p>}
           <p className="fd-bill-fine"><ShieldCheck size={15}/>{paymentMethod === "cod" ? "Pay in cash when your food arrives." : `${paymentMethodLabel(paymentMethod)} · you're only charged once, even if you retry.`}</p>
           <ul className="fd-bill-perks"><li><Navigation size={14}/> Live tracking after you order</li><li><ChefHat size={14}/> Cooked fresh by the kitchen</li></ul>
         </aside>
@@ -2182,13 +2164,12 @@ function CartPage(){
 }
 const MART_FREE_DELIVERY = 299;
 const MART_DELIVERY_FEE = 25;
-const martHeroWords = ["fruits", "veggies", "dairy", "snacks", "essentials"];
 const martTrySearches = ["Milk", "Bananas", "Paneer", "Bread", "Chips"];
 const martCategoryOrder = ["Fruits", "Vegetables", "Dairy", "Bakery", "Breakfast", "Beverages", "Snacks", "Staples", "Home care"];
 const martCategoryLook = {
   Fruits: { image: "1610832958506-aa56368176cf", tint: "#fff1e8", emoji: "🍎" },
   Vegetables: { image: "1597362925123-77861d3fbac7", tint: "#ecf8ea", emoji: "🥕" },
-  Dairy: { image: "1563636619-e9143da7973b", tint: "#eef5ff", emoji: "🥛" },
+  Dairy: { image: "1639151082235-406d8eb262b9", tint: "#eef5ff", emoji: "🥛" },
   Bakery: { image: "1509440159596-0249088772ff", tint: "#fff4e2", emoji: "🍞" },
   Breakfast: { image: "1517673400267-0251440c45dc", tint: "#fbf3e8", emoji: "🥣" },
   Beverages: { image: "1497534446932-c925b458314e", tint: "#fff0f3", emoji: "🧃" },
@@ -2482,7 +2463,7 @@ function InstamartPage(){
    <div className="im-wrap im-hero-inner">
     <div className="im-hero-copy">
      <span className="im-pill"><span className="im-live"/>{location?.city?<>Delivering to <b>{location.city}</b></>:"GoFoode Mart · Daily essentials"}</span>
-     <h1 id="mart-hero-title">Fresh <span className="hx-sr-only">groceries</span><RotatingWord words={martHeroWords}/><br/>at your doorstep.</h1>
+     <h1 id="mart-hero-title">Groceries and essentials, delivered in minutes.</h1>
      <p>Fruits, vegetables, dairy and everyday essentials, picked with care and delivered to your door.</p>
      <form className="im-search" role="search" onSubmit={submitSearch} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget)){setSuggestOpen(false);setActiveSuggest(-1)}}}>
       <div className="im-search-box">
@@ -2502,7 +2483,7 @@ function InstamartPage(){
          <span onClick={event=>event.stopPropagation()}>{renderQty(product,true)}</span>
         </li>)}</ul>
         <button type="button" className="im-suggest-all" onClick={()=>runSearch(query)}>See all {searched.length} {searched.length===1?"result":"results"} for “{query}” <ArrowRight size={15}/></button></>
-       :<div className="im-suggest-empty"><span aria-hidden="true">🔍</span><p>No products match “{query}”. Try “milk”, “fruit” or browse a category.</p></div>)}
+       :<div className="im-suggest-empty"><span aria-hidden="true"><SearchX size={24}/></span><p>No products match “{query}”. Try “milk”, “fruit” or browse a category.</p></div>)}
       </div>}
      </form>
      <div className="im-try"><span>Try:</span>{martTrySearches.map(term=><button type="button" key={term} onClick={()=>runSearch(term)}>{term}</button>)}</div>
@@ -2526,7 +2507,6 @@ function InstamartPage(){
       <svg viewBox="0 0 120 120" aria-hidden="true"><defs><path id="im-sticker-path" d="M60,60 m-45,0 a45,45 0 1,1 90,0 a45,45 0 1,1 -90,0"/></defs><text><textPath href="#im-sticker-path" textLength="276" lengthAdjust="spacing">FREE DELIVERY • ORDERS ABOVE ₹{MART_FREE_DELIVERY} • </textPath></text></svg>
       <span><Truck size={22}/></span>
      </div>
-     <span className="im-emoji e0" aria-hidden="true">🥑</span><span className="im-emoji e1" aria-hidden="true">🍓</span><span className="im-emoji e2" aria-hidden="true">🥕</span><span className="im-emoji e3" aria-hidden="true">🥛</span>
     </div>
    </div>
   </section>
@@ -2573,7 +2553,7 @@ function InstamartPage(){
    <div className="im-shop-layout">
     <aside className={`im-filters ${filtersOpen?"open":""}`} aria-label="Product filters" {...(filtersOpen?{"data-im-dialog":"",role:"dialog","aria-modal":"true",tabIndex:-1}:{})}>
      <div className="im-filters-head"><h3><SlidersHorizontal size={17}/> Filters</h3>{activeFilters.length>0&&<button type="button" className="im-link" onClick={clearFilters}>Clear all</button>}<button type="button" className="im-close im-only-sheet" aria-label="Close filters" onClick={()=>setFiltersOpen(false)}><X size={18}/></button></div>
-     <fieldset className="im-fieldset"><legend>Category</legend>{["All",...categories.map(entry=>entry.name)].map(name=><label key={name} className={`im-option ${category===name?"on":""}`}><input type="radio" name="im-category" value={name} checked={category===name} onChange={()=>setCategory(name)}/><span className="im-option-icon" aria-hidden="true">{name==="All"?"🛒":martLook(name).emoji}</span><span className="im-option-label">{name==="All"?"All products":name}</span><small>{categoryCount(name)}</small></label>)}</fieldset>
+     <fieldset className="im-fieldset"><legend>Category</legend>{["All",...categories.map(entry=>entry.name)].map(name=><label key={name} className={`im-option ${category===name?"on":""}`}><input type="radio" name="im-category" value={name} checked={category===name} onChange={()=>setCategory(name)}/><span className="im-option-icon" aria-hidden="true">{name==="All"||!martLook(name).image?<ShoppingBasket size={16}/>:<img src={unsplash(martLook(name).image,64)} alt="" loading="lazy" onError={showImageFallback}/>}</span><span className="im-option-label">{name==="All"?"All products":name}</span><small>{categoryCount(name)}</small></label>)}</fieldset>
      <fieldset className="im-fieldset"><legend>Price</legend>{martPriceRanges.map(range=><label key={range.id} className={`im-option ${priceRange===range.id?"on":""}`}><input type="radio" name="im-price" value={range.id} checked={priceRange===range.id} onChange={()=>setPriceRange(range.id)}/><span className="im-radio-dot" aria-hidden="true"/><span className="im-option-label">{range.label}</span><small>{priceCount(range.test)}</small></label>)}</fieldset>
      <fieldset className="im-fieldset"><legend>Show only</legend>
       <label className="im-switch"><input type="checkbox" checked={onOffer} onChange={event=>setOnOffer(event.target.checked)}/><span aria-hidden="true"/>On offer · 10%+ off</label>
@@ -2590,9 +2570,9 @@ function InstamartPage(){
       <label className="im-sort"><span>Sort</span><select value={sort} aria-label="Sort products" onChange={event=>setSort(event.target.value)}>{martSorts.map(option=><option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
       <div className="im-view" role="group" aria-label="Product layout"><button type="button" aria-label="Grid layout" aria-pressed={view==="grid"} className={view==="grid"?"on":""} onClick={()=>setView("grid")}><LayoutGrid size={17}/></button><button type="button" aria-label="List layout" aria-pressed={view==="list"} className={view==="list"?"on":""} onClick={()=>setView("list")}><List size={17}/></button></div>
      </div>
-     {loadError?<div className="im-empty"><span className="im-empty-art" aria-hidden="true">📦</span><h3>The shelves didn't load</h3><p>{loadError}</p><button type="button" className="btn btn-primary" onClick={()=>{setLoading(true);load()}}><RefreshCw size={15}/> Try again</button></div>
+     {loadError?<div className="im-empty"><span className="im-empty-art" aria-hidden="true"><PackageSearch size={44}/></span><h3>The shelves didn't load</h3><p>{loadError}</p><button type="button" className="btn btn-primary" onClick={()=>{setLoading(true);load()}}><RefreshCw size={15}/> Try again</button></div>
      :loading?<div className="im-grid">{Array.from({length:8},(_,index)=><div className="im-card im-skeleton" key={index} aria-hidden="true"><span/><i/><i/><i/></div>)}</div>
-     :filtered.length===0?<div className="im-empty"><span className="im-empty-art" aria-hidden="true">{savedOnly&&!saved.length?"💚":"🧺"}</span><h3>{savedOnly&&!saved.length?"Nothing saved yet":"No products match"}</h3><p>{savedOnly&&!saved.length?"Tap the heart on any product to keep it here for later.":"Try another search, or clear a filter to see more of the store."}</p><button type="button" className="btn btn-primary" onClick={clearFilters}>Show all products</button></div>
+     :filtered.length===0?<div className="im-empty"><span className="im-empty-art" aria-hidden="true">{savedOnly&&!saved.length?<Heart size={44}/>:<SearchX size={44}/>}</span><h3>{savedOnly&&!saved.length?"Nothing saved yet":"No products match"}</h3><p>{savedOnly&&!saved.length?"Tap the heart on any product to keep it here for later.":"Try another search, or clear a filter to see more of the store."}</p><button type="button" className="btn btn-primary" onClick={clearFilters}>Show all products</button></div>
      :<><div className={`im-grid ${view==="list"?"list":""}`}>{filtered.slice(0,limit).map((product,index)=>renderCard(product,index,view==="list"?"row":"grid"))}</div>
       {filtered.length>limit&&<div className="im-more"><span>Showing {limit} of {filtered.length} products</span><i><i style={{width:`${limit/filtered.length*100}%`}}/></i><button type="button" className="btn btn-outline" onClick={()=>setLimit(current=>current+12)}>Show more products <ChevronRight size={16}/></button></div>}</>}
     </div>
@@ -2610,7 +2590,7 @@ function InstamartPage(){
  {basketItems.length>0&&!drawerOpen&&<div className="im-basketbar" role="region" aria-label="Basket summary">
   <button type="button" className="im-basketbar-main" onClick={()=>setDrawerOpen(true)} aria-label={`Open basket: ${count} items, ${money(subtotal)}`}>
    <span className="im-basketbar-icon" data-basket-target><ShoppingBasket size={21}/><b key={count}>{count}</b></span>
-   <span className="im-basketbar-copy"><b>{count} {count===1?"item":"items"} · {money(subtotal)}</b><small>{remaining>0?`Add ${money(remaining)} more for free delivery`:"🎉 Free delivery unlocked"}</small><span className="im-meter"><i style={{width:`${freeProgress}%`}}/></span></span>
+   <span className="im-basketbar-copy"><b>{count} {count===1?"item":"items"} · {money(subtotal)}</b><small>{remaining>0?`Add ${money(remaining)} more for free delivery`:"Free delivery unlocked"}</small><span className="im-meter"><i style={{width:`${freeProgress}%`}}/></span></span>
   </button>
   <button type="button" className="im-basketbar-cta" onClick={showCheckout}>Checkout <ArrowRight size={16}/></button>
  </div>}
@@ -2618,9 +2598,9 @@ function InstamartPage(){
  {drawerOpen&&<div className="im-overlay drawer" onClick={event=>{if(event.target===event.currentTarget)setDrawerOpen(false)}}>
   <aside className="im-drawer" role="dialog" aria-modal="true" aria-labelledby="im-drawer-title" tabIndex={-1} data-im-dialog>
    <header><span className="im-drawer-icon" data-basket-target><ShoppingBasket size={20}/></span><div><h2 id="im-drawer-title">Your basket</h2><small>{count} {count===1?"item":"items"} · {money(subtotal)}</small></div><button type="button" className="im-close" aria-label="Close basket" onClick={()=>setDrawerOpen(false)}><X size={18}/></button></header>
-   <div className={`im-free ${remaining===0?"done":""}`}><p>{remaining>0?<>Add <b>{money(remaining)}</b> more for <b>free delivery</b></>:<>🎉 You've unlocked <b>free delivery</b></>}</p><div className="im-free-bar"><i style={{width:`${freeProgress}%`}}/></div></div>
+   <div className={`im-free ${remaining===0?"done":""}`}><p>{remaining>0?<>Add <b>{money(remaining)}</b> more for <b>free delivery</b></>:<><Check size={14} strokeWidth={3}/> You've unlocked <b>free delivery</b></>}</p><div className="im-free-bar"><i style={{width:`${freeProgress}%`}}/></div></div>
    <div className="im-drawer-scroll">
-    {basketItems.length===0?<div className="im-drawer-empty"><span className="im-empty-art" aria-hidden="true">🧺</span><h3>Your basket is empty</h3><p>Add a few essentials and they'll show up here.</p></div>:<>
+    {basketItems.length===0?<div className="im-drawer-empty"><span className="im-empty-art" aria-hidden="true"><ShoppingBasket size={44}/></span><h3>Your basket is empty</h3><p>Add a few essentials and they'll show up here.</p></div>:<>
      <ul className="im-drawer-items">{basketItems.map(product=><li key={product._id} style={{"--tint":martLook(product.category).tint}}>
       <img src={product.image||imageFallback} alt="" onError={showImageFallback}/>
       <span><b>{product.name}</b><small>{product.unit} · {money(product.price)} each</small></span>

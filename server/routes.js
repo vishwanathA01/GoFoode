@@ -15,10 +15,13 @@ import paymentRoutes, {
   hashCheckoutRequest, paymentEvent, paymentForOrder, publicPayment, pushEvent, readIdempotencyKey, recordCashCollected,
   refundGroceryOrder, replayCheckout, restockGrocery, settleCancelledOrder
 } from "./payments.js";
+import trackingRoutes, { bearingDeg, ensureTracking } from "./tracking.js";
+import { fromGeoJson, isPoint } from "./geo.js";
 
 const router = express.Router();
 router.use(paymentRoutes);
 router.use(engagementRoutes);
+router.use(trackingRoutes);
 // Public campaign coupons, plus the caller's own unused prizes when a customer token is sent.
 const usableCouponQuery = (code, userId) => ({ code, isActive: true, usedAt: null, $or: [{ owner: null }, ...(userId ? [{ owner: userId }] : [])] });
 // Online orders stay hidden from the kitchen until they're paid. Legacy orders have no payment link.
@@ -257,7 +260,7 @@ router.patch("/restaurant/orders/:id/status", protect, allow("restaurant_owner")
   const changes = { orderStatus: next };
   if (next === "rejected") Object.assign(changes, { cancelledAt: new Date(), cancelledBy: "restaurant", cancellationReason: String(req.body.reason || "").trim().slice(0, 200) || "The restaurant couldn't accept this order" });
   // Conditional on the status we validated, so a simultaneous customer cancellation can't be overwritten.
-  const updated = await Order.findOneAndUpdate({ _id: order._id, orderStatus: order.orderStatus }, { $set: changes }, { new: true });
+  const updated = await Order.findOneAndUpdate({ _id: order._id, orderStatus: order.orderStatus }, { $set: changes, $push: { statusHistory: { status: next, at: new Date() } } }, { new: true });
   if (!updated) return res.status(409).json({ message: "This order was just updated. Refresh to see its latest status." });
   let refundNote = "";
   if (next === "rejected") {
@@ -270,6 +273,8 @@ router.patch("/restaurant/orders/:id/status", protect, allow("restaurant_owner")
     const delivery = await Delivery.findOneAndUpdate({ order: order._id }, { $setOnInsert: { order: order._id, pickupLocation: order.restaurant.address, dropLocation: order.deliveryAddress } }, { upsert: true, new: true });
     await Order.updateOne({ _id: order._id }, { $set: { delivery: delivery._id } });
     updated.delivery = delivery._id;
+    // Work out the map route now, so the rider and customer maps open instantly.
+    ensureTracking(updated).catch(() => {});
     const availablePartners = await User.find({ role: "delivery_partner", isActive: true, isAvailable: true }).select("_id");
     await Promise.all(availablePartners.map(partner => notify(partner._id, "Delivery available", `Order ${order.orderNumber} is ready for pickup from ${order.restaurant.name}.`, "delivery", { orderId: order._id, deliveryId: delivery._id })));
     emit(req, "role:delivery_partner", "delivery:available", { orderId: order._id, deliveryId: delivery._id, orderNumber: order.orderNumber });
@@ -572,7 +577,7 @@ router.patch("/delivery/assignments/:id/accept", protect, allow("delivery_partne
     await User.findByIdAndUpdate(req.user._id,{isAvailable:true});
     return res.status(409).json({ message: "Assignment is no longer available" });
   }
-  const order = await Order.findById(delivery.order).populate("restaurant", "owner name");
+  const order = await Order.findByIdAndUpdate(delivery.order, { $push: { statusHistory: { status: "rider_assigned", at: new Date() } } }, { new: true }).populate("restaurant", "owner name");
   if (order) {
     await notify(order.customer, "Delivery partner assigned", `A delivery partner accepted order ${order.orderNumber}. You can follow updates and shared GPS on the order tracking page.`, "delivery", { orderId: order._id });
     await notify(order.restaurant.owner, "Delivery partner assigned", `A delivery partner accepted order ${order.orderNumber}.`, "delivery", { orderId: order._id });
@@ -592,6 +597,7 @@ router.patch("/delivery/assignments/:id/status", protect, allow("delivery_partne
   const order = await Order.findById(delivery.order);
   const collectsCash = next === "delivered" && order.paymentMethod === "cod";
   order.orderStatus = next; if (collectsCash) order.paymentStatus = "paid";
+  order.statusHistory.push({ status: next, at: new Date() });
   await order.save();
   if (collectsCash) await recordCashCollected(order).catch(error => console.error("[payments] cash collection not recorded:", error.message));
   if (next === "delivered") await User.findByIdAndUpdate(req.user._id, { isAvailable: true });
@@ -604,11 +610,21 @@ router.post("/delivery/location", protect, allow("delivery_partner"), asyncHandl
   if (!deliveryId || !Number.isFinite(Number(longitude)) || !Number.isFinite(Number(latitude)) || Math.abs(Number(longitude)) > 180 || Math.abs(Number(latitude)) > 90) return res.status(400).json({ message: "Valid delivery ID and GPS coordinates are required" });
   const delivery = await Delivery.findOne({ _id: deliveryId, deliveryPartner: req.user._id, status: { $in: ["accepted","picked_up","on_the_way"] } });
   if (!delivery) return res.status(404).json({ message: "Delivery not found" });
-  delivery.currentLocation = { type: "Point", coordinates: [Number(longitude), Number(latitude)] };
+  const point = [Number(latitude), Number(longitude)];
+  const previous = fromGeoJson(delivery.currentLocation?.coordinates);
+  // Use the device's heading when it sends one; otherwise point the rider along their last movement.
+  const sentHeading = Number(req.body.heading);
+  const moved = isPoint(previous) && (Math.abs(previous[0] - point[0]) > 0.00002 || Math.abs(previous[1] - point[1]) > 0.00002);
+  const heading = req.body.heading != null && Number.isFinite(sentHeading) ? ((sentHeading % 360) + 360) % 360 : moved ? bearingDeg(previous, point) : delivery.heading;
+  const updatedAt = new Date();
+  delivery.currentLocation = { type: "Point", coordinates: [point[1], point[0]] };
+  delivery.locationUpdatedAt = updatedAt;
+  delivery.heading = heading ?? null;
   await delivery.save();
-  const order = await Order.findById(delivery.order);
-  emit(req, `user:${order.customer}`, "delivery:location", { orderId: order._id, coordinates: delivery.currentLocation.coordinates, updatedAt: new Date() });
-  res.json({ message: "Location updated" });
+  const order = await Order.findById(delivery.order).select("customer restaurant");
+  const payload = { orderId: order._id, deliveryId: delivery._id, coordinates: delivery.currentLocation.coordinates, heading: delivery.heading, updatedAt };
+  emit(req, `user:${order.customer}`, "delivery:location", payload);
+  res.json({ message: "Location updated", updatedAt });
 }));
 router.get("/delivery/earnings", protect, allow("delivery_partner"), asyncHandler(async (req, res) => {
   const deliveries = await Delivery.find({ deliveryPartner: req.user._id, status: "delivered" }).populate({ path: "order", populate: { path: "restaurant", select: "name" } }).sort({ actualDeliveryTime: -1 }).limit(200);

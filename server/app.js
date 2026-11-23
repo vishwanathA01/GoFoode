@@ -73,7 +73,8 @@ app.use("/api", (req, res) => res.status(404).json({ message: `Route not found: 
 
 // After `npm run build`, the API also serves the website, so one `npm start` runs everything on one port.
 const clientDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../client/dist");
-if (fs.existsSync(path.join(clientDist, "index.html"))) {
+// On Vercel the website is served from its CDN, so the function only handles /api.
+if (!process.env.VERCEL && fs.existsSync(path.join(clientDist, "index.html"))) {
   app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
   app.use(express.static(clientDist, {
     index: false,

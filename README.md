@@ -24,7 +24,7 @@ npm run dev
 That one command installs any missing packages, checks MongoDB, picks free ports (other projects on your machine can keep theirs), starts the API and the website, and prints the address to open:
 
 ```
-  GoFoode is running  →  http://localhost:5173
+  GoFoode is running  →  http://localhost:5180
 ```
 
 First time only, add the demo data: `npm run seed`. To use your phone on the same Wi-Fi, open the **Network** URL that the website prints.
@@ -34,7 +34,7 @@ First time only, add the demo data: `npm run seed`. To use your phone on the sam
 |---|---|
 | `MongoDB isn't reachable` | Start it: `brew services start mongodb-community` (macOS) or `docker run -d -p 27017:27017 mongo:7`, or put an Atlas URI in `server/.env` as `MONGODB_URI`. |
 | `Port 5001 is already in use` | Another app holds the port. `npm run dev` from the project folder picks a free one automatically; or set `PORT` in `server/.env`. |
-| A different website opens at `localhost:5173` | Another project is using that port. Use the URL printed after `GoFoode is running`. |
+| A different website opens, or pages can't load data | Another project, or an old GoFoode window started before `npm run dev`, is using the port. Stop old dev servers (Ctrl+C in their terminals) and use the URL printed after `GoFoode is running` (normally `http://localhost:5180`). |
 | Pages load but data doesn't | The API isn't running. Start everything with `npm run dev` from the project folder (not inside `client/`). |
 
 ### Running the API and website separately
@@ -49,6 +49,23 @@ If the API uses another port, start the website with `GOFOODE_API_PORT=<port> np
 npm run build    # builds the website into client/dist
 npm start        # the API serves the website and /api together on one port
 ```
+
+### Deploying to Vercel
+The repository deploys to Vercel as one project: the website from `client/dist` on Vercel's CDN, and the API as a single serverless function (`api/index.js` → `server/serverless.js`, the same Express app as `npm start`). `vercel.json` holds the build, routing and region settings; `.vercelignore` keeps `.env` files out of uploads.
+
+Set these environment variables on the Vercel project (Production):
+| Variable | Value |
+|---|---|
+| `MONGODB_URI` | A MongoDB Atlas connection string. Atlas Network Access must allow `0.0.0.0/0`, because Vercel functions have no fixed IPs. |
+| `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` | Long random strings. |
+| `CLIENT_URL` | The site's address, e.g. `https://gofoode.vercel.app`. |
+| `VITE_DISABLE_SOCKETS` | `true`. Vercel can't hold websocket connections, so pages poll instead (order tracking refreshes every ~8 seconds). |
+| `ALLOW_TEST_PAYMENTS` | `true` to offer UPI, card and net banking through the built-in test gateway (no real money) on a demo deployment. Remove it once Razorpay keys are set. |
+| `CHATBOT_*` | Optional, as in `server/.env.example`. |
+
+Don't set `NODE_ENV`: it also applies to the build, where it would stop npm installing Vite. The function switches to production mode by itself (`server/vercelEnv.js`). Functions run in Mumbai (`bom1`), next to an Atlas cluster in `ap-south-1`; keep the two in the same region, or every request crosses continents.
+
+Fill a new database with `MONGODB_URI="<atlas uri>" npm run seed --prefix server`, then `npm run sync-marketplace` and `npm run sync-grocery` the same way. On Vercel, online payments stay off (cash on delivery only) until Razorpay keys or `ALLOW_TEST_PAYMENTS=true` are set, and the background payment sweep doesn't run: overdue checkouts expire when they're next read.
 
 ## Demo accounts
 The seed script creates:
@@ -73,7 +90,7 @@ Change these credentials before any public deployment. The seed script is for de
 - Admin overview, user/restaurant/order management.
 - Reviews and notifications.
 - Customer feedback appears on the homepage after customers review completed orders; uploaded profile photos are available to every account role.
-- Restaurant status changes notify customers in-app; ready orders notify online delivery partners, and order tracking shows shared rider GPS when available.
+- Restaurant status changes notify customers in-app; ready orders notify online delivery partners, and each order has a live tracking map with the rider's position (see **Live order tracking**).
 - Home page community and partner sections use live restaurant and review data rather than placeholder testimonials.
 - Basic Socket.IO order event broadcast.
 - Responsive role dashboards.
@@ -99,7 +116,7 @@ npm run setup    # install server and client packages
 ## Suggested next work
 1. Test the Razorpay integration with your own test keys and webhook, then switch to live keys. Extend online payments to GoFoode Mart and Plus.
 2. Add Cloudinary signed uploads.
-3. Add Google Maps Places/Routes and authenticated GPS rooms.
+3. Before real traffic, move map tiles, geocoding and routing to hosted or self-run services (see **Live order tracking**).
 4. Add Jest/Supertest integration tests and Playwright end-to-end tests.
 5. Add MongoDB replica-set transactions for multi-document checkout.
 
@@ -148,7 +165,7 @@ To add the Chinese-food and cold-drink restaurants, menu items and upcoming demo
 - Delivery partner: `rider@gofoode.demo` / `Rider123!`
 - Customer: `customer@gofoode.demo` / `Customer123!`
 
-Run `npm run seed` only on a development database; it resets the demo users, demo restaurants, grocery products and selected demo coupons. Restaurant status and delivery-partner updates are in-app notifications; email/SMS sending is not configured. Live order maps show the delivery partner's latest shared GPS location only after they accept the delivery and grant location permission.
+Run `npm run seed` only on a development database; it resets the demo users, demo restaurants, grocery products and selected demo coupons. Restaurant status and delivery-partner updates are in-app notifications; email/SMS sending is not configured. The demo kitchens are Smash & Co. Burgers, Spice Route Kitchen, Stone Oven Pizzeria, Lotus Wok House, The Green Bowl Co., Sugar & Crumb Bakery, Wok & Bowl Express and Chill & Sip Cafe, each with a street address and map position in Faridabad (`server/demoCatalog.js`). `npm run sync-marketplace` renames the older "GoFoode Demo …" kitchens in an existing database without touching orders or menus.
 
 ### Integrations and production hardening still required
 This is an advanced academic/demo codebase, not a production-certified logistics platform. Online payments cover food orders only; GoFoode Mart orders and Plus subscriptions don't collect money yet. Production deployment still requires transactional stock updates, address/geocoding and maps integration, real-time GPS map UI, image storage, email/SMS/OTP, partner document/KYC review, refund and cancellation policies, privacy/security review, automated tests, rate/abuse controls and operational monitoring. Dineout currently records a reservation request; it does not check a restaurant's live table inventory.
@@ -164,9 +181,9 @@ This is an advanced academic/demo codebase, not a production-certified logistics
 - Customer workspaces include grocery order history and quick links for food, groceries, addresses and favourites. Restaurant workspaces include menu/order shortcuts, restaurant status, revenue and recent kitchen orders. Delivery partners can accept and progress Genie pickup/drop requests alongside restaurant deliveries.
 - Dineout restaurant cards show restaurant imagery and details before a reservation request is started. Reservations are requests and do not confirm live table availability.
 - Menu items support calories, preparation time, spice level, ingredients, allergens, portion size and bestseller labels.
-- Delivery partners share GPS while an accepted/picked-up/on-the-way assignment is active and location permission is granted. The customer order tracking page refreshes order/GPS data every seven seconds and shows the latest rider location on an OpenStreetMap embed.
+- Delivery partners share GPS while an accepted/picked-up/on-the-way assignment is active and location permission is granted. Each point reaches the customer's order page over Socket.IO straight away (see **Live order tracking**).
 - Browser geolocation requires user permission and a secure context (HTTPS in production; localhost is suitable for development). GPS sharing only works while the delivery partner dashboard is open and the browser/device is sharing location. This is not background tracking.
-- Delivery tracking and active rider assignments use Google Maps embeds and directions links. Set `VITE_GOOGLE_MAPS_API_KEY` in `client/.env` to enable the Maps Embed API view; restrict the key to your local and production web origins and enable Maps Embed API in Google Cloud. Without a key, Google Maps preview and directions links remain available.
+- Order tracking and rider routes use interactive OpenStreetMap maps (Leaflet). Riders get a Navigate button that opens Google Maps directions. The profile location card and Pickup & drop still use Google Maps embeds: set `VITE_GOOGLE_MAPS_API_KEY` in `client/.env` to enable the Maps Embed API view; restrict the key to your local and production web origins. Without a key, the preview and directions links still work.
 - The home-page chatbot supports OpenAI-compatible APIs and Google Gemini. For Gemini, set `CHATBOT_PROVIDER=gemini`, `CHATBOT_API_URL=https://generativelanguage.googleapis.com/v1beta/models`, `CHATBOT_API_KEY`, and `CHATBOT_MODEL=gemini-flash-lite-latest` in `server/.env`; restart the API afterward. Keep the key server-side and use a key generated for the Gemini API (not a Google Maps key). The assistant can also send signed-in conversations to the admin support queue.
 - Customer dashboard tabs include saved delivery addresses, reservation history and GoFoode Plus membership. Restaurant partners can manage approved restaurant availability and review customer feedback. Delivery partners can control shift availability, view completed delivery earnings, and open their route in Google Maps. Admins can review platform metrics, activity logs and support-ticket statuses.
 # GoFoode
@@ -174,7 +191,7 @@ This is an advanced academic/demo codebase, not a production-certified logistics
 ## Payments
 Food checkout supports UPI, cards and net banking through Razorpay, plus cash on delivery.
 
-**Gateways.** `PAYMENT_GATEWAY=auto` (the default) uses Razorpay when `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` are set. Otherwise, outside production, it uses a built-in test gateway that moves no money. In production with no keys, only cash on delivery is offered. The test gateway's payment window can simulate a success, a bank decline, or a payment where the app loses its connection.
+**Gateways.** `PAYMENT_GATEWAY=auto` (the default) uses Razorpay when `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` are set. Otherwise, outside production, it uses a built-in test gateway that moves no money. In production with no keys, only cash on delivery is offered, unless `ALLOW_TEST_PAYMENTS=true` is set for a demo deployment: then the test gateway is offered and checkout labels every online payment as a test. The test gateway's payment window can simulate a success, a bank decline, or a payment where the app loses its connection.
 
 **How an online order flows.** Checkout creates the orders in `awaiting_payment` and opens a payment window. Restaurants don't see these orders until the payment succeeds. A failed or abandoned payment can be retried, switched to cash on delivery, or cancelled. If nothing happens for `PAYMENT_WINDOW_MINUTES` (default 15), the orders are cancelled and the items go back into the customer's cart.
 
@@ -216,7 +233,7 @@ Food checkout supports UPI, cards and net banking through Razorpay, plus cash on
 
 **GoFoode Plus.** A public page with a membership card, perks, a savings estimator and FAQs. Free delivery is real: active members pay no delivery fee on food orders, and the cart shows "FREE with Plus". Membership is still a demo with no payment taken.
 
-**Photos.** All photography is real, never AI-generated. Restaurant, dish and event photos come from Unsplash (free under the [Unsplash License](https://unsplash.com/license)). The delivery photos on the homepage, login and sign-up pages, and the link-preview image, are stored in `client/public/images/`. A restaurant without its own cover photo gets a real photo of its cuisine (`client/src/media.js`), and people without a profile photo get initials. `npm run sync-marketplace` (in `server/`) gives each demo event its own photo and restores missing demo restaurant covers. It never overwrites a cover an owner uploaded.
+**Photos.** All photography is real. Restaurant, dish and event photos come from Unsplash (free under the [Unsplash License](https://unsplash.com/license)). The homepage hero, the sign-in and sign-up photos and the link-preview image are stored in `client/public/images/`. Decorative emoji are replaced with icons, and accounts without a profile photo show initials. `npm run sync-marketplace` (in `server/`) gives the demo kitchens their brand names, street addresses and map positions, replaces broken or mismatched dish photos, and fills in missing covers. It never overwrites a photo an owner uploaded.
 
 ## Delivery location, dashboards and profile
 **Location picker.** "Delivering to" in the header opens one sheet with these options:
@@ -226,7 +243,11 @@ Food checkout supports UPI, cards and net banking through Razorpay, plus cash on
 - Ten popular cities.
 - A manual form.
 
+Choosing GPS, a search result or a city then opens a map with a fixed pin, like quick-commerce apps: drag the map until the pin is on your door and the address updates as you go. "Set location on the map" opens the pin straight away. A confirmed pin is saved with its exact coordinates and street, prefills checkout, and travels with the order, so tracking starts from your door.
+
 On phones it opens as a bottom sheet. A place you pick stays put; only GPS fixes refresh themselves hourly. The code is in `client/src/location.jsx`.
+
+**Distance and delivery time.** Once your location is set, restaurant cards show how far each kitchen is and a delivery window based on that distance (for kitchens within 30 km). "Fastest" on the Food page sorts by it.
 
 **Account dashboards.** Every role (customer, restaurant, rider, admin) shares one workspace shell:
 - **Sidebar:** your photo or initials, plus a slide-in menu on phones.
@@ -239,7 +260,33 @@ Stat cards, tables, status badges and forms use readable sizes and clear status 
 
 **Public menus and 404.** Visitors can browse any restaurant's menu; adding to cart or saving a favourite asks them to log in. Unknown links show a 404 page with routes back into the site instead of silently opening the homepage.
 
-**Demo avatar.** The demo customer uses a real photo (`client/public/images/avatar-demo-customer.jpg`, from Unsplash). Accounts without a photo get initials.
+## Live order tracking
+Each active food order opens on a live tracking page (`client/src/tracking.jsx`):
+- **Arrival countdown** in minutes, with the clock time. While the rider is riding, it comes from the road distance still to go; before pickup, from the kitchen's promised time.
+- **Four-step progress bar:** Confirmed, Preparing, On the way, Delivered.
+- **Map** with the kitchen, your address, the road route and the rider. The part already ridden turns grey.
+- **Rider card** with a call button, and a **timeline** showing when each step happened.
+
+**Where the rider is drawn.** With live GPS (a point received in the last 3 minutes), the rider glides to each new point as soon as the phone sends it. Points arrive over Socket.IO (`delivery:location`), with polling as a fallback. Without live GPS, the rider is drawn where they should be by now along the route, and the map says "Estimated position".
+
+**How the route is worked out.** The first time an order is tracked, the API:
+1. Places the address on the map: the pinned point if there is one, otherwise the street address, then its PIN code, then its city.
+2. Places the kitchen: demo kitchens have fixed positions, others are looked up from their address once and saved.
+3. Fetches a road route between them.
+4. Stores all of it on the order, so later views are instant.
+
+If the kitchen is more than 30 km from the address (likely with demo data, since every demo kitchen is in Faridabad), the map shows a stand-in kitchen a couple of kilometres away and says so.
+
+**Demo ride.** On the rider dashboard, each active job shows its route, its distance and time, and a **Navigate** button (Google Maps directions). In development there is also a **Demo ride** button. It replays the route through the same GPS endpoint a phone uses, so you can watch the rider move on the customer's order page in another window. Set `VITE_DEMO_TOOLS=true` to show it in production builds.
+
+**Services and limits.** These free public services have fair-use limits and are fine for development and demos:
+- **Map tiles:** OpenStreetMap. Set `VITE_MAP_TILE_URL` (and `VITE_MAP_TILE_ATTRIBUTION`) in `client/.env` to use a hosted tile service with your key.
+- **Geocoding:** OpenStreetMap Nominatim. The API sends at most one request per second and caches results.
+- **Routing:** the public OSRM server. When it can't be reached, the map shows an approximate curved path and says so.
+
+For real traffic, use hosted or self-run geocoding and routing, configured with `NOMINATIM_URL` and `OSRM_URL` in `server/.env`.
+
+**API:** `GET /api/v1/orders/:id/tracking` (the customer, the kitchen's owner, the assigned rider or an admin) and `GET /api/v1/delivery/assignments/:id/route` (riders). `POST /api/v1/delivery/location` also accepts an optional `heading`.
 
 ## GoFoode Mart checkout
 After choosing groceries, customers go through a three-step secure checkout (`client/src/martCheckout.jsx`):

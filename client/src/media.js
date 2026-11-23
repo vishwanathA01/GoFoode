@@ -2,7 +2,8 @@
 const unsplash = (id, width = 900) => `https://images.unsplash.com/photo-${id}?w=${width}&q=75&auto=format&fit=crop`;
 
 export const photos = {
-  doorstep: "/images/delivery-doorstep.jpg",
+  hero: "/images/hero-dish-curry.jpg",
+  signin: "/images/signin-thali.jpg",
   scooter: "/images/delivery-scooter.jpg",
   dining: unsplash("1414235077428-338989a2e8c0", 1600),
   gathering: unsplash("1511795409834-ef04bbd61622", 1600),
