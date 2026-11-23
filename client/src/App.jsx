@@ -285,6 +285,18 @@ function ChatWidget() {
   </div>;
 }
 const unsplash = (id, width = 480) => `https://images.unsplash.com/photo-${id}?w=${width}&q=75&auto=format&fit=crop`;
+// Asks Unsplash for a smaller copy of a dish photo; any other image is used as it is.
+const resizedPhoto = (url, width) => /^https:\/\/images\.unsplash\.com\//.test(url || "") ? url.replace(/([?&])w=\d+/, `$1w=${width}`) : url;
+// Each craving searches for words that real dishes on the menu contain.
+const heroCravings = [
+  { label: "Biryani", term: "Biryani", image: "1589302168068-964664d93dc0" },
+  { label: "Pizza", term: "Pizza", image: "1565299624946-b28f40a0ae38" },
+  { label: "Burgers", term: "Burger", image: "1568901346375-23c9450c58cd" },
+  { label: "Noodles", term: "Noodles", image: "1612929633738-8fe44f7ec841" },
+  { label: "Desserts", term: "Dessert", image: "1606313564200-e75d5e30476c" }
+];
+// The rider's path on the hero's mini map. The CSS animates the rider dot along the same path.
+const heroRoute = "M18 52C48 52 54 24 88 24S134 50 168 50S208 22 230 22";
 const prefersReducedMotion = () => typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 const homeCategories = [
   { name: "Indian", note: "Rich & comforting", image: "1585937421612-70a008356fbe" },
@@ -386,16 +398,16 @@ function Home() {
   const featuredDishLimit = 12;
   const featuredDishes = showAllDishes ? filteredDishes : filteredDishes.slice(0, featuredDishLimit);
   const isFiltering = Boolean(search.trim()) || category !== "All";
-  const cuisineCount = new Set(restaurants.flatMap(r => r.cuisine || []).map(c => String(c).trim().toLowerCase()).filter(Boolean)).size;
   const deliveryTimes = restaurants.map(r => Number(r.deliveryTime)).filter(time => time > 0);
   const averageDelivery = deliveryTimes.length ? Math.round(deliveryTimes.reduce((sum, time) => sum + time, 0) / deliveryTimes.length) : 0;
-  const stats = [
+  const heroFacts = [
     { icon: Store, value: restaurants.length, label: "Local kitchens" },
-    { icon: Utensils, value: dishes.length, label: "Dishes on the menu" },
-    { icon: Sparkles, value: cuisineCount, label: "Cuisines" },
-    { icon: Clock, value: averageDelivery, suffix: " min", label: "Average delivery" }
-  ].filter(stat => stat.value > 0);
-  const topKitchen = restaurants.reduce((best, entry) => (entry.rating || 0) > (best?.rating || 0) ? entry : best, null);
+    { icon: Utensils, value: dishes.length, label: "Dishes to try" },
+    { icon: Clock, value: averageDelivery, suffix: " min", label: "Avg. delivery" }
+  ].filter(fact => fact.value > 0);
+  const openKitchens = restaurants.filter(entry => entry.isOpen !== false).length;
+  // The hero's dish card shows a real bestseller from the best-rated kitchen.
+  const spotlight = dishes.filter(dish => dish.isBestseller && dish.image && dish.restaurant).sort((a, b) => (b.restaurant.rating || 0) - (a.restaurant.rating || 0))[0];
   const scrollToDishes = () => document.getElementById("popular-dishes")?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth" });
   const quickSearch = term => { setSearch(term); setCategory("All"); scrollToDishes(); };
   return <><Header/><main className="gofoode-home" ref={homeRef}>
@@ -404,28 +416,53 @@ function Home() {
     <section className="hp-hero" aria-labelledby="hp-hero-title">
       <div className="hx-wrap hp-hero-grid">
         <div className="hp-hero-copy">
-          <p className="hp-hero-kicker"><MapPin size={14}/>{location?.city ? `Now delivering in ${location.city}` : "Food delivery · Groceries · Dineout"}</p>
-          <h1 id="hp-hero-title">Food you love, from kitchens <span>near you.</span></h1>
+          {openKitchens > 0
+            ? <p className="hp-hero-kicker"><span className="hp-kicker-live"><i/>Live</span>{openKitchens} kitchen{openKitchens === 1 ? "" : "s"} {location?.city ? `open now in ${location.city}` : "taking orders now"}</p>
+            : <p className="hp-hero-kicker"><MapPin size={14}/>Food delivery · Groceries · Dineout</p>}
+          <h1 id="hp-hero-title">Food you love, from kitchens <span className="hp-hl">near you.<svg viewBox="0 0 300 14" preserveAspectRatio="none" aria-hidden="true"><path d="M4 10 C70 3 170 2 296 7" pathLength="1"/></svg></span></h1>
           <p className="hp-hero-lead">Order from trusted local restaurants, follow your rider live on the map, and eat while it’s still hot.</p>
           <form className="hp-search" role="search" onSubmit={event => { event.preventDefault(); scrollToDishes(); }}>
             <button type="button" className="hp-search-loc" onClick={() => setLocationOpen(true)} aria-haspopup="dialog" aria-label={`Delivery location: ${location?.label || "not set"}. Change location`}>
               <MapPin size={18}/><span><small>Deliver to</small><b>{location?.label || "Set your location"}</b></span><ChevronDown size={16}/>
             </button>
-            <label className="hp-search-field"><Search size={18}/><input aria-label="Search dishes, restaurants or cuisines" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search for a dish or restaurant"/>{search && <button type="button" className="hx-search-clear" aria-label="Clear search" onClick={() => setSearch("")}><X size={15}/></button>}</label>
-            <button type="submit" className="btn btn-primary">Search</button>
+            <label className="hp-search-field"><Search size={18}/><input aria-label="Search dishes, restaurants or cuisines" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search dishes or restaurants"/>{search && <button type="button" className="hx-search-clear" aria-label="Clear search" onClick={() => setSearch("")}><X size={15}/></button>}</label>
+            <button type="submit" className="btn btn-primary" aria-label="Search"><span>Search</span><ArrowRight size={16}/></button>
           </form>
-          <div className="hp-quick"><span>Popular</span>{["Biryani", "Pizza", "Burger", "Momos", "Paneer"].map(term => <button type="button" key={term} onClick={() => quickSearch(term)}>{term}</button>)}</div>
-          {!loading && stats.length >= 2 && <dl className="hp-facts">{stats.map(stat => <div key={stat.label}><dt>{stat.label}</dt><dd>{stat.value}{stat.suffix || ""}</dd></div>)}</dl>}
+          <div className="hp-quick"><span>Popular</span>{heroCravings.map(item => <button type="button" key={item.label} onClick={() => quickSearch(item.term)}><img src={unsplash(item.image, 72)} alt="" loading="lazy" onError={showImageFallback}/>{item.label}</button>)}</div>
+          {!loading && heroFacts.length >= 2 && <ul className="hp-facts">{heroFacts.map(fact => <li key={fact.label}><span className="hp-fact-icon" aria-hidden="true"><fact.icon size={17}/></span><span><b>{fact.value}{fact.suffix || ""}</b><small>{fact.label}</small></span></li>)}</ul>}
         </div>
-        <div className="hp-hero-art" aria-hidden="true">
-          <figure className="hp-art-main"><img src="/images/hero-dish-curry.jpg" alt="" fetchpriority="high"/></figure>
-          <figure className="hp-art-side a"><img src="/images/hero-dish-biryani.jpg" alt=""/></figure>
-          <figure className="hp-art-side b"><img src="/images/hero-dish-pizza.jpg" alt=""/></figure>
-          <div className="hp-art-card track">
-            <span className="hp-art-icon"><Bike size={19}/></span>
-            <div><b>Arriving in 12 min</b><small>Your rider is 1.8 km away</small><span className="hp-art-progress"><i/><i/><i className="now"/><i/></span></div>
+        <div className="hp-stage" aria-hidden="true">
+          <span className="hp-stage-glow"/>
+          <span className="hp-stage-ring"/>
+          <figure className="hp-arch"><img src="/images/hero-dish-curry.jpg" alt="" width="860" height="1080" fetchpriority="high"/></figure>
+          <figure className="hp-bubble one"><img src="/images/hero-dish-biryani.jpg" alt="" width="520" height="520"/></figure>
+          <figure className="hp-bubble two"><img src="/images/hero-dish-pizza.jpg" alt="" width="520" height="520"/></figure>
+          <div className="hp-sticker">
+            <svg viewBox="0 0 120 120"><defs><path id="hp-sticker-path" d="M60 60m-45 0a45 45 0 1 1 90 0a45 45 0 1 1-90 0"/></defs><text><textPath href="#hp-sticker-path" textLength="279" lengthAdjust="spacing">FIRST ORDER • 50% OFF • WELCOME50 •</textPath></text></svg>
+            <b>50%<small>off</small></b>
           </div>
-          {topKitchen && <div className="hp-art-card score"><Star size={14} fill="currentColor"/><b>{Number(topKitchen.rating).toFixed(1)}</b><span>{topKitchen.name}</span></div>}
+          <div className="hp-float hp-track-card">
+            <div className="hp-track-top">
+              <span className="hp-track-icon"><Bike size={18}/></span>
+              <span className="hp-track-text"><b>Arriving in 12 min</b><small>Your rider is 1.8 km away</small></span>
+              <span className="hp-live"><i/>Live</span>
+            </div>
+            <div className="hp-mini-map">
+              <svg viewBox="0 0 252 72" width="252" height="72">
+                <path className="street" d="M0 22H252M0 58H252M64 0V72M150 0V72M214 0V72"/>
+                <rect className="park" x="160" y="30" width="46" height="20" rx="6"/>
+                <path className="route-base" d={heroRoute}/>
+                <path className="route-done" d={heroRoute} pathLength="1"/>
+              </svg>
+              <span className="hp-pin store"><Store size={11}/></span>
+              <span className="hp-pin home"><House size={11}/></span>
+              <span className="hp-rider-dot"/>
+            </div>
+          </div>
+          {spotlight && <div className="hp-float hp-dish-card">
+            <img src={resizedPhoto(spotlight.image, 128)} alt="" onError={showImageFallback}/>
+            <span><span className="hp-dish-top"><em>Bestseller</em><strong>{money(spotlight.discountPrice ?? spotlight.price)}</strong></span><b>{spotlight.name}</b><small><Star size={12} fill="currentColor"/>{Number(spotlight.restaurant.rating || 0).toFixed(1)} · {spotlight.restaurant.name}</small></span>
+          </div>}
         </div>
       </div>
     </section>
